@@ -1,126 +1,115 @@
 <script lang="ts">
-	import Sidebar from '$lib/components/Sidebar.svelte';
-	import ThreadView from '$lib/components/ThreadView.svelte';
-	import ContextPanel from '$lib/components/ContextPanel.svelte';
-	import ProfileView from '$lib/components/ProfileView.svelte';
-	import SearchOverlay from '$lib/components/SearchOverlay.svelte';
-	import RemindersPanel from '$lib/components/RemindersPanel.svelte';
-	import QuickCapture from '$lib/components/QuickCapture.svelte';
-	import AddPersonOverlay from '$lib/components/AddPersonOverlay.svelte';
-	import { onMount } from 'svelte';
-	import { liveQuery, type Subscription } from 'dexie';
-	import { db } from '$lib/db';
-	import type { Contact } from '$lib/data';
+  import Sidebar from '$lib/components/Sidebar.svelte';
+  import ThreadView from '$lib/components/ThreadView.svelte';
+  import ContextPanel from '$lib/components/ContextPanel.svelte';
+  import ProfileView from '$lib/components/ProfileView.svelte';
+  import SearchOverlay from '$lib/components/SearchOverlay.svelte';
+  import RemindersPanel from '$lib/components/RemindersPanel.svelte';
+  import QuickCapture from '$lib/components/QuickCapture.svelte';
+  import AddPersonOverlay from '$lib/components/AddPersonOverlay.svelte';
+  import { onMount } from 'svelte';
+  import { liveQuery, type Subscription } from 'dexie';
+  import { db } from '$lib/db';
+  import type { Contact } from '$lib/data';
 
-	type Screen = 'thread' | 'profile';
+  type Screen = 'thread' | 'profile';
 
-	let contacts = $state<Contact[]>([]);
-	let activeId = $state<string | null>(null);
-	let screen = $state<Screen>('thread');
-	let searchOpen = $state(false);
-	let remindersOpen = $state(false);
-	let quickOpen = $state(false);
-	let addPersonOpen = $state(false);
+  let contacts = $state<Contact[]>([]);
+  let activeId = $state<string | null>(null);
+  let screen = $state<Screen>('thread');
+  let searchOpen = $state(false);
+  let remindersOpen = $state(false);
+  let quickOpen = $state(false);
+  let addPersonOpen = $state(false);
 
-	let activeContact = $derived(
-		(activeId && contacts.find((c) => c.id === activeId)) || null
-	);
+  let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
 
-	onMount(() => {
-		try {
-			const saved = localStorage.getItem('crm_activeId');
-			if (saved) activeId = saved;
-		} catch {}
+  onMount(() => {
+    try {
+      const saved = localStorage.getItem('crm_activeId');
+      if (saved) activeId = saved;
+    } catch {
+      // localStorage unavailable (private mode, quota, etc.)
+    }
 
-		const sub: Subscription = liveQuery(() =>
-			db.contacts.orderBy('order').toArray()
-		).subscribe({
-			next: (val) => {
-				contacts = val;
-				if (activeId && !val.some((c) => c.id === activeId)) activeId = null;
-				if (!activeId && val.length > 0) activeId = val[0].id;
-			}
-		});
+    const sub: Subscription = liveQuery(() => db.contacts.orderBy('order').toArray()).subscribe({
+      next: (val) => {
+        contacts = val;
+        if (activeId && !val.some((c) => c.id === activeId)) activeId = null;
+        if (!activeId && val.length > 0) activeId = val[0].id;
+      }
+    });
 
-		const onKey = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-				e.preventDefault();
-				searchOpen = true;
-			}
-		};
-		window.addEventListener('keydown', onKey);
-		return () => {
-			sub.unsubscribe();
-			window.removeEventListener('keydown', onKey);
-		};
-	});
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchOpen = true;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      sub.unsubscribe();
+      window.removeEventListener('keydown', onKey);
+    };
+  });
 
-	$effect(() => {
-		try {
-			if (activeId) localStorage.setItem('crm_activeId', activeId);
-			else localStorage.removeItem('crm_activeId');
-		} catch {}
-	});
+  $effect(() => {
+    try {
+      if (activeId) localStorage.setItem('crm_activeId', activeId);
+      else localStorage.removeItem('crm_activeId');
+    } catch {
+      // localStorage unavailable (private mode, quota, etc.)
+    }
+  });
 
-	function selectContact(id: string) {
-		activeId = id;
-		screen = 'thread';
-	}
+  function selectContact(id: string) {
+    activeId = id;
+    screen = 'thread';
+  }
 </script>
 
 <div class="shell">
-	<Sidebar
-		{contacts}
-		{activeId}
-		onSelect={selectContact}
-		onSearch={() => (searchOpen = true)}
-		onReminders={() => (remindersOpen = true)}
-		onAddPerson={() => (addPersonOpen = true)}
-	/>
+  <Sidebar
+    {contacts}
+    {activeId}
+    onSelect={selectContact}
+    onSearch={() => (searchOpen = true)}
+    onReminders={() => (remindersOpen = true)}
+    onAddPerson={() => (addPersonOpen = true)}
+  />
 
-	{#if screen === 'profile' && activeContact}
-		<ProfileView contact={activeContact} onBack={() => (screen = 'thread')} />
-	{:else}
-		<ThreadView
-			contact={activeContact}
-			onOpenProfile={() => (screen = 'profile')}
-			onQuickCapture={() => (quickOpen = true)}
-		/>
-		<ContextPanel contact={activeContact} onOpenProfile={() => (screen = 'profile')} />
-	{/if}
+  {#if screen === 'profile' && activeContact}
+    <ProfileView contact={activeContact} onBack={() => (screen = 'thread')} />
+  {:else}
+    <ThreadView
+      contact={activeContact}
+      onOpenProfile={() => (screen = 'profile')}
+      onQuickCapture={() => (quickOpen = true)}
+    />
+    <ContextPanel contact={activeContact} onOpenProfile={() => (screen = 'profile')} />
+  {/if}
 </div>
 
 {#if searchOpen}
-	<SearchOverlay
-		{contacts}
-		onClose={() => (searchOpen = false)}
-		onSelect={selectContact}
-	/>
+  <SearchOverlay {contacts} onClose={() => (searchOpen = false)} onSelect={selectContact} />
 {/if}
 {#if remindersOpen}
-	<RemindersPanel
-		{contacts}
-		onClose={() => (remindersOpen = false)}
-		onSelect={selectContact}
-	/>
+  <RemindersPanel {contacts} onClose={() => (remindersOpen = false)} onSelect={selectContact} />
 {/if}
 {#if quickOpen}
-	<QuickCapture onClose={() => (quickOpen = false)} />
+  <QuickCapture onClose={() => (quickOpen = false)} />
 {/if}
 {#if addPersonOpen}
-	<AddPersonOverlay
-		onClose={() => (addPersonOpen = false)}
-		onAdded={selectContact}
-	/>
+  <AddPersonOverlay onClose={() => (addPersonOpen = false)} onAdded={selectContact} />
 {/if}
 
 <style>
-	.shell {
-		display: flex;
-		height: 100vh;
-		width: 100vw;
-		overflow: hidden;
-		position: relative;
-		z-index: 1;
-	}
+  .shell {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
 </style>
