@@ -7,23 +7,33 @@
 	import RemindersPanel from '$lib/components/RemindersPanel.svelte';
 	import QuickCapture from '$lib/components/QuickCapture.svelte';
 	import { onMount } from 'svelte';
-	import { CONTACTS } from '$lib/data';
+	import { liveQuery, type Subscription } from 'dexie';
+	import { db, seedIfEmpty } from '$lib/db';
+	import type { Contact } from '$lib/data';
 
 	type Screen = 'thread' | 'profile';
 
+	let contacts = $state<Contact[]>([]);
 	let activeId = $state('alex');
 	let screen = $state<Screen>('thread');
 	let searchOpen = $state(false);
 	let remindersOpen = $state(false);
 	let quickOpen = $state(false);
 
-	let activeContact = $derived(CONTACTS.find((c) => c.id === activeId) ?? null);
+	let activeContact = $derived(contacts.find((c) => c.id === activeId) ?? null);
 
 	onMount(() => {
+		let sub: Subscription | null = null;
 		try {
 			const saved = localStorage.getItem('crm_activeId');
-			if (saved && CONTACTS.some((c) => c.id === saved)) activeId = saved;
+			if (saved) activeId = saved;
 		} catch {}
+
+		seedIfEmpty().then(() => {
+			sub = liveQuery(() => db.contacts.orderBy('order').toArray()).subscribe({
+				next: (val) => (contacts = val)
+			});
+		});
 
 		const onKey = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -32,7 +42,10 @@
 			}
 		};
 		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
+		return () => {
+			sub?.unsubscribe();
+			window.removeEventListener('keydown', onKey);
+		};
 	});
 
 	$effect(() => {
@@ -49,7 +62,7 @@
 
 <div class="shell">
 	<Sidebar
-		contacts={CONTACTS}
+		{contacts}
 		{activeId}
 		onSelect={selectContact}
 		onSearch={() => (searchOpen = true)}
@@ -70,14 +83,14 @@
 
 {#if searchOpen}
 	<SearchOverlay
-		contacts={CONTACTS}
+		{contacts}
 		onClose={() => (searchOpen = false)}
 		onSelect={selectContact}
 	/>
 {/if}
 {#if remindersOpen}
 	<RemindersPanel
-		contacts={CONTACTS}
+		{contacts}
 		onClose={() => (remindersOpen = false)}
 		onSelect={selectContact}
 	/>

@@ -38,6 +38,7 @@ export type ContactReminder = {
 
 export type Contact = {
 	id: string;
+	order: number;
 	name: string;
 	initials: string;
 	avatarColor: string;
@@ -56,6 +57,7 @@ export type Contact = {
 export const CONTACTS: Contact[] = [
 	{
 		id: 'alex',
+		order: 1,
 		name: 'Alex Chen',
 		initials: 'AC',
 		avatarColor: 'oklch(72% 0.13 200)',
@@ -89,6 +91,7 @@ export const CONTACTS: Contact[] = [
 	},
 	{
 		id: 'maria',
+		order: 2,
 		name: 'Maria Santos',
 		initials: 'MS',
 		avatarColor: 'oklch(68% 0.13 30)',
@@ -116,6 +119,7 @@ export const CONTACTS: Contact[] = [
 	},
 	{
 		id: 'jordan',
+		order: 3,
 		name: 'Jordan Lee',
 		initials: 'JL',
 		avatarColor: 'oklch(68% 0.13 140)',
@@ -141,6 +145,7 @@ export const CONTACTS: Contact[] = [
 	},
 	{
 		id: 'priya',
+		order: 4,
 		name: 'Priya Nair',
 		initials: 'PN',
 		avatarColor: 'oklch(68% 0.13 285)',
@@ -167,6 +172,7 @@ export const CONTACTS: Contact[] = [
 	},
 	{
 		id: 'sam',
+		order: 5,
 		name: 'Sam Park',
 		initials: 'SP',
 		avatarColor: 'oklch(65% 0.12 60)',
@@ -191,6 +197,7 @@ export const CONTACTS: Contact[] = [
 	},
 	{
 		id: 'charlie',
+		order: 6,
 		name: 'Charlie Davis',
 		initials: 'CD',
 		avatarColor: 'oklch(68% 0.1 322)',
