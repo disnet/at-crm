@@ -1,0 +1,67 @@
+{
+  "id": "id.sifa.profile.project",
+  "defs": {
+    "main": {
+      "key": "tid",
+      "type": "record",
+      "record": {
+        "type": "object",
+        "required": [
+          "name",
+          "createdAt"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the project (website, repository, demo, etc.)."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "description": "Project name.",
+            "maxGraphemes": 100
+          },
+          "labels": {
+            "refs": [
+              "com.atproto.label.defs#selfLabels"
+            ],
+            "type": "union",
+            "description": "Self-label values for this project record."
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Project end date. Omit if ongoing."
+          },
+          "position": {
+            "ref": "com.atproto.repo.strongRef",
+            "type": "ref",
+            "description": "Reference to the associated id.sifa.profile.position record, if applicable."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Client-declared timestamp when this record was originally created."
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Project start date."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 50000,
+            "description": "Description of the project, the user's role, and outcomes.",
+            "maxGraphemes": 5000
+          }
+        }
+      },
+      "description": "Record representing a single project."
+    }
+  },
+  "$type": "com.atproto.lexicon.schema",
+  "lexicon": 1,
+  "description": "A project the user has worked on."
+}

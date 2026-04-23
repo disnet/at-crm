@@ -10,12 +10,13 @@
 
 	type Props = {
 		contacts: Contact[];
-		activeId: string;
+		activeId: string | null;
 		onSelect: (id: string) => void;
 		onSearch: () => void;
 		onReminders: () => void;
+		onAddPerson: () => void;
 	};
-	let { contacts, activeId, onSelect, onSearch, onReminders }: Props = $props();
+	let { contacts, activeId, onSelect, onSearch, onReminders, onAddPerson }: Props = $props();
 
 	let totalReminders = $derived(contacts.filter((c) => c.reminder).length);
 
@@ -36,7 +37,7 @@
 			<IconBtn label="Reminders" onclick={onReminders} badge={totalReminders}>
 				<BellIcon size={16} strokeWidth={2} />
 			</IconBtn>
-			<IconBtn label="Add person" onclick={() => {}}>
+			<IconBtn label="Add person" onclick={onAddPerson}>
 				<PlusIcon size={17} strokeWidth={2} />
 			</IconBtn>
 		</div>
@@ -51,6 +52,15 @@
 	</div>
 
 	<div class="list">
+		{#if contacts.length === 0}
+			<div class="empty">
+				<p class="empty-title">No one here yet.</p>
+				<p class="empty-body">
+					Tap <button type="button" class="empty-plus" onclick={onAddPerson} aria-label="Add person">+</button> to look up someone by their Bluesky handle.
+				</p>
+			</div>
+		{/if}
+
 		{#if groups.withUnread.length > 0}
 			<div class="group-head">
 				<span class="group-label">Waiting for you</span>
@@ -176,6 +186,41 @@
 		flex: 1;
 		overflow-y: auto;
 		padding: 0 8px 12px;
+	}
+
+	.empty {
+		padding: 28px 18px 12px;
+		text-align: center;
+	}
+	.empty-title {
+		font-family: var(--font-display);
+		font-size: var(--fs-md);
+		font-weight: 400;
+		color: var(--text-strong);
+		letter-spacing: -0.01em;
+		margin-bottom: 6px;
+	}
+	.empty-body {
+		font-size: var(--fs-xs);
+		color: var(--text-muted);
+		line-height: 1.6;
+	}
+	.empty-plus {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 18px;
+		height: 18px;
+		border-radius: 5px;
+		background: var(--accent-wash);
+		color: var(--accent-ink);
+		font-weight: 700;
+		vertical-align: -3px;
+		margin: 0 1px;
+		transition: background var(--dur-fast);
+	}
+	.empty-plus:hover {
+		background: var(--accent-tint);
 	}
 
 	.group-head {

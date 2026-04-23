@@ -42,7 +42,13 @@
 <div class="index">
 	<!-- Header card with profile gist -->
 	<section class="gist">
-		<Avatar initials={contact.initials} color={contact.avatarColor} size={56} ring />
+		<Avatar
+			initials={contact.initials}
+			color={contact.avatarColor}
+			size={56}
+			ring
+			imageUrl={contact.avatarUrl}
+		/>
 		<div class="gist-body">
 			<h2 class="gist-name">{contact.name}</h2>
 			<div class="gist-tag">{contact.tagline}</div>

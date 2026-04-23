@@ -1,0 +1,86 @@
+{
+  "id": "id.sifa.profile.publication",
+  "defs": {
+    "main": {
+      "key": "tid",
+      "type": "record",
+      "record": {
+        "type": "object",
+        "required": [
+          "title",
+          "createdAt"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL to the publication."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "description": "Publication title.",
+            "maxGraphemes": 200
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "ref": "#author",
+              "type": "ref"
+            },
+            "maxLength": 50,
+            "description": "Co-authors. The record owner is always an implicit author."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Client-declared timestamp when this record was originally created."
+          },
+          "publisher": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Publisher, journal, or venue name.",
+            "maxGraphemes": 100
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 50000,
+            "description": "Description or abstract.",
+            "maxGraphemes": 5000
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Publication date."
+          }
+        }
+      },
+      "description": "Record representing a single publication."
+    },
+    "author": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "Author's ATproto DID, if they have an account."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 1000,
+          "minLength": 1,
+          "description": "Author's display name.",
+          "maxGraphemes": 100
+        }
+      },
+      "description": "A co-author of the publication."
+    }
+  },
+  "$type": "com.atproto.lexicon.schema",
+  "lexicon": 1,
+  "description": "A publication authored or co-authored by the user."
+}

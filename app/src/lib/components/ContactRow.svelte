@@ -14,7 +14,12 @@
 
 <button type="button" class="row" class:active {onclick}>
 	<div class="avatar-wrap">
-		<Avatar initials={contact.initials} color={contact.avatarColor} size={40} />
+		<Avatar
+			initials={contact.initials}
+			color={contact.avatarColor}
+			size={40}
+			imageUrl={contact.avatarUrl}
+		/>
 		{#if contact.unread > 0}
 			<span class="unread" aria-label="{contact.unread} unread">{contact.unread}</span>
 		{/if}

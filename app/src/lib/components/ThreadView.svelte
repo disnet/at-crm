@@ -83,7 +83,12 @@
 	{:else}
 		<!-- Header: compact contact bar -->
 		<header class="head">
-			<Avatar initials={contact.initials} color={contact.avatarColor} size={36} />
+			<Avatar
+				initials={contact.initials}
+				color={contact.avatarColor}
+				size={36}
+				imageUrl={contact.avatarUrl}
+			/>
 			<div class="head-text">
 				<div class="head-name">{contact.name}</div>
 				<div class="head-tag">{contact.tagline}</div>

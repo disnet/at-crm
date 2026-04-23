@@ -90,7 +90,12 @@
 						}}
 						onmouseenter={() => (selected = i)}
 					>
-						<Avatar initials={c.initials} color={c.avatarColor} size={34} />
+						<Avatar
+							initials={c.initials}
+							color={c.avatarColor}
+							size={34}
+							imageUrl={c.avatarUrl}
+						/>
 						<div class="hit-body">
 							<div class="hit-name">{c.name}</div>
 							<div class="hit-tag">{c.tagline}</div>

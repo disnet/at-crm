@@ -44,7 +44,12 @@
 								onClose();
 							}}
 						>
-							<Avatar initials={c.initials} color={c.avatarColor} size={28} />
+							<Avatar
+								initials={c.initials}
+								color={c.avatarColor}
+								size={28}
+								imageUrl={c.avatarUrl}
+							/>
 							<span class="who-name">{c.name}</span>
 						</button>
 						{#if c.reminder}

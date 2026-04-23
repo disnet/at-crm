@@ -2,21 +2,43 @@
 	import Avatar from './Avatar.svelte';
 	import ReminderChip from './ReminderChip.svelte';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
-	import CakeIcon from '@lucide/svelte/icons/cake';
 	import LinkIcon from '@lucide/svelte/icons/link';
-	import { SOURCES, type Contact } from '$lib/data';
+	import BuildingIcon from '@lucide/svelte/icons/building';
+	import AtSignIcon from '@lucide/svelte/icons/at-sign';
+	import ArrowUpRightIcon from '@lucide/svelte/icons/arrow-up-right';
+	import { SOURCES, decodeOpenTo, decodePlatform, type Contact } from '$lib/data';
 
 	type Props = {
 		contact: Contact | null;
 		onOpenProfile: () => void;
 	};
 	let { contact, onOpenProfile }: Props = $props();
+
+	let primaryExternal = $derived(
+		contact?.sifa?.externalAccounts.find((e) => e.isPrimary) ??
+			contact?.sifa?.externalAccounts[0] ??
+			null
+	);
+
+	function tryHostname(u: string): string {
+		try {
+			return new URL(u).hostname.replace(/^www\./, '');
+		} catch {
+			return u;
+		}
+	}
 </script>
 
 <aside class="panel">
 	{#if contact}
 		<header class="head">
-			<Avatar initials={contact.initials} color={contact.avatarColor} size={54} ring />
+			<Avatar
+				initials={contact.initials}
+				color={contact.avatarColor}
+				size={54}
+				ring
+				imageUrl={contact.avatarUrl}
+			/>
 			<h2 class="name">{contact.name}</h2>
 			<p class="tag">{contact.tagline}</p>
 			<button type="button" class="view-full" onclick={onOpenProfile}>View full profile</button>
@@ -25,31 +47,67 @@
 		<section class="block">
 			<h3 class="block-title">Details</h3>
 			<ul class="details">
+				<li>
+					<span class="d-icon"><AtSignIcon size={13} strokeWidth={2} /></span>
+					<a href="https://bsky.app/profile/{contact.handle}" target="_blank" rel="noreferrer">
+						{contact.handle}
+					</a>
+				</li>
 				{#if contact.location}
 					<li>
 						<span class="d-icon"><MapPinIcon size={13} strokeWidth={2} /></span>
 						<span>{contact.location}</span>
 					</li>
 				{/if}
-				{#if contact.birthday}
+				{#if contact.sifa?.self?.industry}
 					<li>
-						<span class="d-icon"><CakeIcon size={13} strokeWidth={2} /></span>
-						<span>{contact.birthday}</span>
+						<span class="d-icon"><BuildingIcon size={13} strokeWidth={2} /></span>
+						<span>{contact.sifa.self.industry}</span>
 					</li>
 				{/if}
-				{#if contact.url}
+				{#if primaryExternal}
 					<li>
 						<span class="d-icon"><LinkIcon size={13} strokeWidth={2} /></span>
-						<span>{contact.url}</span>
+						<a href={primaryExternal.url} target="_blank" rel="noreferrer">
+							{primaryExternal.label || tryHostname(primaryExternal.url)}
+						</a>
 					</li>
 				{/if}
 			</ul>
 		</section>
 
+		{#if contact.sifa?.self?.openTo && contact.sifa.self.openTo.length > 0}
+			<section class="block">
+				<h3 class="block-title">Open to</h3>
+				<div class="open-chips">
+					{#each contact.sifa.self.openTo as v (v)}
+						<span class="open-chip">{decodeOpenTo(v)}</span>
+					{/each}
+				</div>
+			</section>
+		{/if}
+
 		{#if contact.reminder}
 			<section class="block">
 				<h3 class="block-title">Reminder</h3>
 				<ReminderChip reminder={contact.reminder} variant="embedded" />
+			</section>
+		{/if}
+
+		{#if contact.sifa?.externalAccounts && contact.sifa.externalAccounts.length > 1}
+			<section class="block">
+				<h3 class="block-title">Links</h3>
+				<ul class="ext-list">
+					{#each contact.sifa.externalAccounts as ext, i (i)}
+						<li>
+							<a class="ext" href={ext.url} target="_blank" rel="noreferrer">
+								<span class="ext-label">{ext.label || tryHostname(ext.url)}</span>
+								<span class="ext-platform">{decodePlatform(ext.platform)}</span>
+								<ArrowUpRightIcon size={11} strokeWidth={2} />
+							</a>
+						</li>
+					{/each}
+				</ul>
 			</section>
 		{/if}
 
@@ -146,6 +204,12 @@
 		gap: 8px;
 		font-size: var(--fs-sm);
 		color: var(--text);
+		min-width: 0;
+	}
+	.details li > a, .details li > span:not(.d-icon) {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.d-icon {
 		display: inline-flex;
@@ -158,6 +222,55 @@
 		color: var(--text-muted);
 		flex-shrink: 0;
 	}
+
+	.open-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 5px;
+	}
+	.open-chip {
+		font-size: 10.5px;
+		font-weight: 500;
+		color: var(--amber-deep);
+		background: var(--amber-tint);
+		padding: 2px 8px;
+		border-radius: 99px;
+	}
+
+	.ext-list {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.ext {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 10px;
+		border-radius: var(--r-sm);
+		background: var(--bg-dim);
+		color: var(--text);
+		transition: background var(--dur-fast);
+		min-width: 0;
+	}
+	.ext:hover { background: var(--surface-inset); text-decoration: none; }
+	.ext-label {
+		flex: 1;
+		font-size: var(--fs-xs);
+		color: var(--text-strong);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.ext-platform {
+		font-size: 9.5px;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--text-subtle);
+	}
+	.ext :global(svg) { color: var(--text-subtle); }
 
 	.sources {
 		list-style: none;

@@ -1,0 +1,91 @@
+{
+  "id": "id.sifa.profile.self",
+  "defs": {
+    "main": {
+      "key": "literal:self",
+      "type": "record",
+      "record": {
+        "type": "object",
+        "required": ["createdAt"],
+        "properties": {
+          "about": {
+            "type": "string",
+            "maxLength": 50000,
+            "description": "Professional summary or about section. Longer-form than Bluesky's description field.",
+            "maxGraphemes": 5000
+          },
+          "langs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "language"
+            },
+            "maxLength": 3,
+            "description": "BCP 47 language tags indicating the user's primary professional languages."
+          },
+          "labels": {
+            "refs": ["com.atproto.label.defs#selfLabels"],
+            "type": "union",
+            "description": "Self-label values for the professional profile."
+          },
+          "openTo": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "knownValues": [
+                "id.sifa.defs#fullTimeRoles",
+                "id.sifa.defs#partTimeRoles",
+                "id.sifa.defs#contractRoles",
+                "id.sifa.defs#boardPositions",
+                "id.sifa.defs#mentoringOthers",
+                "id.sifa.defs#beingMentored",
+                "id.sifa.defs#collaborations"
+              ]
+            },
+            "maxLength": 10,
+            "description": "Types of opportunities the user is open to. Empty array or omitted means not actively seeking."
+          },
+          "headline": {
+            "type": "string",
+            "maxLength": 1200,
+            "description": "Professional headline (e.g., 'Senior Engineer at Acme Corp'). Distinct from Bluesky's displayName.",
+            "maxGraphemes": 120
+          },
+          "industry": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Primary professional industry.",
+            "maxGraphemes": 100
+          },
+          "location": {
+            "ref": "community.lexicon.location.address",
+            "type": "ref",
+            "description": "Professional location (city, region, country). Uses community location lexicon."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Client-declared timestamp when this profile was originally created."
+          },
+          "preferredWorkplace": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "knownValues": [
+                "id.sifa.defs#onSite",
+                "id.sifa.defs#remote",
+                "id.sifa.defs#hybrid"
+              ]
+            },
+            "maxLength": 3,
+            "description": "Preferred workplace arrangements. Orthogonal to openTo. Empty array or omitted means no preference."
+          }
+        }
+      },
+      "description": "The user's professional profile summary."
+    }
+  },
+  "$type": "com.atproto.lexicon.schema",
+  "lexicon": 1,
+  "description": "Professional profile summary. Singleton record providing professional identity beyond the base ATproto profile. Does not duplicate displayName, avatar, or bio from app.bsky.actor.profile."
+}

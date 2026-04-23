@@ -4,11 +4,14 @@
 		color: string;
 		size?: number;
 		ring?: boolean;
+		imageUrl?: string;
 	};
 
-	let { initials, color, size = 36, ring = false }: Props = $props();
+	let { initials, color, size = 36, ring = false, imageUrl }: Props = $props();
 
 	let fontSize = $derived(Math.max(10, Math.round(size * 0.36)));
+	let imgFailed = $state(false);
+	let showImage = $derived(!!imageUrl && !imgFailed);
 </script>
 
 <div
@@ -18,7 +21,11 @@
 	style:--size="{size}px"
 	style:--fs="{fontSize}px"
 >
-	<span class="initials">{initials}</span>
+	{#if showImage}
+		<img src={imageUrl} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
+	{:else}
+		<span class="initials">{initials}</span>
+	{/if}
 </div>
 
 <style>
@@ -51,5 +58,13 @@
 
 	.initials {
 		text-shadow: 0 1px 1px oklch(0% 0 0 / 0.1);
+	}
+
+	img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		border-radius: 50%;
+		display: block;
 	}
 </style>

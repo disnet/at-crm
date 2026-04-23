@@ -6,33 +6,40 @@
 	import SearchOverlay from '$lib/components/SearchOverlay.svelte';
 	import RemindersPanel from '$lib/components/RemindersPanel.svelte';
 	import QuickCapture from '$lib/components/QuickCapture.svelte';
+	import AddPersonOverlay from '$lib/components/AddPersonOverlay.svelte';
 	import { onMount } from 'svelte';
 	import { liveQuery, type Subscription } from 'dexie';
-	import { db, seedIfEmpty } from '$lib/db';
+	import { db } from '$lib/db';
 	import type { Contact } from '$lib/data';
 
 	type Screen = 'thread' | 'profile';
 
 	let contacts = $state<Contact[]>([]);
-	let activeId = $state('alex');
+	let activeId = $state<string | null>(null);
 	let screen = $state<Screen>('thread');
 	let searchOpen = $state(false);
 	let remindersOpen = $state(false);
 	let quickOpen = $state(false);
+	let addPersonOpen = $state(false);
 
-	let activeContact = $derived(contacts.find((c) => c.id === activeId) ?? null);
+	let activeContact = $derived(
+		(activeId && contacts.find((c) => c.id === activeId)) || null
+	);
 
 	onMount(() => {
-		let sub: Subscription | null = null;
 		try {
 			const saved = localStorage.getItem('crm_activeId');
 			if (saved) activeId = saved;
 		} catch {}
 
-		seedIfEmpty().then(() => {
-			sub = liveQuery(() => db.contacts.orderBy('order').toArray()).subscribe({
-				next: (val) => (contacts = val)
-			});
+		const sub: Subscription = liveQuery(() =>
+			db.contacts.orderBy('order').toArray()
+		).subscribe({
+			next: (val) => {
+				contacts = val;
+				if (activeId && !val.some((c) => c.id === activeId)) activeId = null;
+				if (!activeId && val.length > 0) activeId = val[0].id;
+			}
 		});
 
 		const onKey = (e: KeyboardEvent) => {
@@ -43,14 +50,15 @@
 		};
 		window.addEventListener('keydown', onKey);
 		return () => {
-			sub?.unsubscribe();
+			sub.unsubscribe();
 			window.removeEventListener('keydown', onKey);
 		};
 	});
 
 	$effect(() => {
 		try {
-			localStorage.setItem('crm_activeId', activeId);
+			if (activeId) localStorage.setItem('crm_activeId', activeId);
+			else localStorage.removeItem('crm_activeId');
 		} catch {}
 	});
 
@@ -67,6 +75,7 @@
 		onSelect={selectContact}
 		onSearch={() => (searchOpen = true)}
 		onReminders={() => (remindersOpen = true)}
+		onAddPerson={() => (addPersonOpen = true)}
 	/>
 
 	{#if screen === 'profile' && activeContact}
@@ -97,6 +106,12 @@
 {/if}
 {#if quickOpen}
 	<QuickCapture onClose={() => (quickOpen = false)} />
+{/if}
+{#if addPersonOpen}
+	<AddPersonOverlay
+		onClose={() => (addPersonOpen = false)}
+		onAdded={selectContact}
+	/>
 {/if}
 
 <style>
