@@ -11,6 +11,8 @@
   import XIcon from '@lucide/svelte/icons/x';
   import UsersIcon from '@lucide/svelte/icons/users-round';
   import BookOpenIcon from '@lucide/svelte/icons/book-open';
+  import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
+  import PanelRightOpenIcon from '@lucide/svelte/icons/panel-right-open';
   import {
     isMessage,
     isNote,
@@ -25,8 +27,11 @@
     contact: Contact | null;
     onOpenProfile: () => void;
     onQuickCapture: () => void;
+    contextCollapsed: boolean;
+    onToggleContext: () => void;
   };
-  let { contact, onOpenProfile, onQuickCapture }: Props = $props();
+  let { contact, onOpenProfile, onQuickCapture, contextCollapsed, onToggleContext }: Props =
+    $props();
 
   type View = 'index' | SourceKey;
   let activeSource = $state<View>('index');
@@ -108,6 +113,20 @@
       <button type="button" class="head-profile" onclick={onOpenProfile}>
         <UserIcon size={13} strokeWidth={2} />
         <span>Profile</span>
+      </button>
+      <button
+        type="button"
+        class="head-toggle"
+        onclick={onToggleContext}
+        aria-label={contextCollapsed ? 'Show details panel' : 'Hide details panel'}
+        aria-pressed={!contextCollapsed}
+        title={contextCollapsed ? 'Show details' : 'Hide details'}
+      >
+        {#if contextCollapsed}
+          <PanelRightOpenIcon size={15} strokeWidth={2} />
+        {:else}
+          <PanelRightCloseIcon size={15} strokeWidth={2} />
+        {/if}
       </button>
     </header>
 
@@ -293,6 +312,25 @@
   .head-profile:hover {
     color: var(--text-strong);
     background: var(--bg-dim);
+  }
+  .head-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    transition:
+      color var(--dur-fast),
+      background var(--dur-fast);
+  }
+  .head-toggle:hover {
+    color: var(--text-strong);
+    background: var(--bg-dim);
+  }
+  .head-toggle[aria-pressed='false'] {
+    color: var(--text-subtle);
   }
 
   /* Tabs */

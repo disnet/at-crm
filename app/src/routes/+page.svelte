@@ -21,6 +21,7 @@
   let remindersOpen = $state(false);
   let quickOpen = $state(false);
   let addPersonOpen = $state(false);
+  let contextCollapsed = $state(false);
 
   let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
 
@@ -28,6 +29,7 @@
     try {
       const saved = localStorage.getItem('crm_activeId');
       if (saved) activeId = saved;
+      contextCollapsed = localStorage.getItem('crm_contextCollapsed') === '1';
     } catch {
       // localStorage unavailable (private mode, quota, etc.)
     }
@@ -62,6 +64,15 @@
     }
   });
 
+  $effect(() => {
+    try {
+      if (contextCollapsed) localStorage.setItem('crm_contextCollapsed', '1');
+      else localStorage.removeItem('crm_contextCollapsed');
+    } catch {
+      // localStorage unavailable (private mode, quota, etc.)
+    }
+  });
+
   function selectContact(id: string) {
     activeId = id;
     screen = 'thread';
@@ -85,8 +96,12 @@
       contact={activeContact}
       onOpenProfile={() => (screen = 'profile')}
       onQuickCapture={() => (quickOpen = true)}
+      contextCollapsed={contextCollapsed}
+      onToggleContext={() => (contextCollapsed = !contextCollapsed)}
     />
-    <ContextPanel contact={activeContact} onOpenProfile={() => (screen = 'profile')} />
+    {#if !contextCollapsed}
+      <ContextPanel contact={activeContact} onOpenProfile={() => (screen = 'profile')} />
+    {/if}
   {/if}
 </div>
 
