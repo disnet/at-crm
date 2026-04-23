@@ -248,7 +248,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 14px;
+    padding: 16px 14px 18px;
     border-top: 1px solid var(--border);
     background: oklch(92% 0.024 62);
   }
