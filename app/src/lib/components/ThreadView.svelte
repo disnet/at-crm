@@ -19,6 +19,7 @@
 		type NoteEntry,
 		type SourceKey
 	} from '$lib/data';
+	import { addNote, sendMockMessage } from '$lib/db';
 
 	type Props = {
 		contact: Contact | null;
@@ -33,8 +34,11 @@
 	let scrollEl = $state<HTMLDivElement | null>(null);
 	let reminderDismissed = $state(false);
 
+	let lastContactId: string | null = null;
 	$effect(() => {
-		contact?.id;
+		const id = contact?.id ?? null;
+		if (id === lastContactId) return;
+		lastContactId = id;
 		activeSource = 'index';
 		inputVal = '';
 		reminderDismissed = false;
@@ -42,6 +46,7 @@
 
 	$effect(() => {
 		void activeSource;
+		void displayMessages.length;
 		if (scrollEl) {
 			queueMicrotask(() => {
 				if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -55,14 +60,21 @@
 		return entries.map((m) => ({ ...m, source: activeSource as SourceKey }));
 	});
 
-	function handleSubmit(e: Event) {
+	async function handleSubmit(e: Event) {
 		e.preventDefault();
+		const text = inputVal.trim();
+		if (!contact || !text) return;
 		inputVal = '';
+		if (activeSource === 'index' || activeSource === 'notes') {
+			await addNote(contact.id, text);
+		} else {
+			await sendMockMessage(contact.id, activeSource as SourceKey, text);
+		}
 	}
 
 	function placeholder() {
 		if (!contact) return 'Say something…';
-		if (activeSource === 'index') return `Write to ${contact.name.split(' ')[0]}…`;
+		if (activeSource === 'index') return 'Write a note…';
 		if (activeSource === 'notes') return 'Add a note, call log, reminder…';
 		return `Message via ${activeSource}…`;
 	}

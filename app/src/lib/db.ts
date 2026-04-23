@@ -1,5 +1,11 @@
 import Dexie, { type Table } from 'dexie';
-import { formatAddress, type Contact } from './data';
+import {
+	formatAddress,
+	type Contact,
+	type Message,
+	type NoteEntry,
+	type SourceKey
+} from './data';
 import { fetchSifaProfile, getProfile, type ActorTypeahead } from './atproto';
 
 class CrmDB extends Dexie {
@@ -86,6 +92,105 @@ export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Cont
 
 	await db.contacts.put(contact);
 	return contact;
+}
+
+function newId(): string {
+	if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+	return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function nowTs(): string {
+	return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function previewOf(text: string): string {
+	const t = text.replace(/\s+/g, ' ').trim();
+	return t.length > 80 ? t.slice(0, 77) + '…' : t;
+}
+
+async function appendToThread(
+	contactId: string,
+	source: SourceKey,
+	entry: Message | NoteEntry,
+	lastMsgPreview: string
+): Promise<void> {
+	const existing = await db.contacts.get(contactId);
+	if (!existing) return;
+	const prior = existing.threads[source] ?? [];
+	const threads = { ...existing.threads, [source]: [...prior, entry] };
+	const sources = existing.sources.includes(source)
+		? existing.sources
+		: [...existing.sources, source];
+	await db.contacts.update(contactId, {
+		threads,
+		sources,
+		lastMsg: lastMsgPreview,
+		lastActive: 'Just now'
+	});
+}
+
+export async function addNote(
+	contactId: string,
+	text: string,
+	type: NoteEntry['type'] = 'note'
+): Promise<void> {
+	const trimmed = text.trim();
+	if (!trimmed) return;
+	const note: NoteEntry = { id: newId(), type, text: trimmed, ts: nowTs() };
+	await appendToThread(contactId, 'notes', note, previewOf(trimmed));
+}
+
+export async function sendMockMessage(
+	contactId: string,
+	source: SourceKey,
+	text: string
+): Promise<void> {
+	const trimmed = text.trim();
+	if (!trimmed) return;
+
+	const outgoing: Message = {
+		id: newId(),
+		dir: 'out',
+		text: trimmed,
+		ts: nowTs()
+	};
+	await appendToThread(contactId, source, outgoing, previewOf(trimmed));
+
+	const channelLabel =
+		source === 'email'
+			? 'email'
+			: source === 'bluesky'
+				? 'DM on Bluesky'
+				: source === 'telegram'
+					? 'Telegram message'
+					: source === 'signal'
+						? 'Signal message'
+						: 'message';
+	const logNote: NoteEntry = {
+		id: newId(),
+		type: 'note',
+		text: `Mocked sending ${channelLabel}: "${previewOf(trimmed)}"`,
+		ts: nowTs()
+	};
+	await appendToThread(contactId, 'notes', logNote, previewOf(trimmed));
+
+	const replies = [
+		'Thanks for the ping!',
+		'Got it — will take a look.',
+		'Appreciate you reaching out.',
+		'Sounds good, let me think on it.',
+		'Ha, same energy. More soon.'
+	];
+	const replyText = replies[Math.floor(Math.random() * replies.length)];
+	setTimeout(async () => {
+		const reply: Message = {
+			id: newId(),
+			dir: 'in',
+			text: replyText,
+			ts: nowTs()
+		};
+		await appendToThread(contactId, source, reply, previewOf(replyText));
+	}, 1400);
 }
 
 export async function refreshSifa(did: string): Promise<void> {
