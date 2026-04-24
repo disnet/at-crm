@@ -34,11 +34,17 @@ Set these in the appropriate environment before enabling the workflow:
 - Secret `CLOUDFLARE_API_TOKEN`
 - Secret `CLOUDFLARE_ACCOUNT_ID`
 - Variable `CLOUDFLARE_PAGES_PROJECT_NAME`
+- Variable `PUBLIC_APP_ORIGIN`
 
 The workflow builds the app with `npm run build` and deploys the generated `build/` directory to Cloudflare Pages:
 
 - `main` pushes and manual runs use the `production` environment
 - pull requests use the `preview` environment
+
+`PUBLIC_APP_ORIGIN` must be the full HTTPS origin used to serve that environment, because the build prerenders `client-metadata.json` for AT Protocol OAuth. Examples:
+
+- `production`: `https://crm.example.com`
+- `preview`: your preview hostname for that environment
 
 The GitHub Environment URL is populated from the Cloudflare deployment returned by Wrangler.
 

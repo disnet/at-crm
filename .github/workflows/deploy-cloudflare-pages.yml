@@ -13,6 +13,8 @@ jobs:
     environment:
       name: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
       url: ${{ steps.deploy.outputs.deployment-url }}
+    env:
+      PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
     permissions:
       contents: read
       deployments: write
