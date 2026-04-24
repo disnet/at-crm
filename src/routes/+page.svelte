@@ -24,7 +24,7 @@
   let remindersOpen = $state(false);
   let quickOpen = $state(false);
   let addPersonOpen = $state(false);
-  let contextCollapsed = $state(false);
+  let contextCollapsed = $state(true);
   let user = $state<AuthUser | null>(null);
   let signingOut = $state(false);
 
@@ -41,7 +41,8 @@
     try {
       const saved = localStorage.getItem('crm_activeId');
       if (saved) activeId = saved;
-      contextCollapsed = localStorage.getItem('crm_contextCollapsed') === '1';
+      contextCollapsed = localStorage.getItem('crm_contextVisible') !== '1';
+      localStorage.removeItem('crm_contextCollapsed');
     } catch {
       // localStorage unavailable (private mode, quota, etc.)
     }
@@ -78,8 +79,8 @@
 
   $effect(() => {
     try {
-      if (contextCollapsed) localStorage.setItem('crm_contextCollapsed', '1');
-      else localStorage.removeItem('crm_contextCollapsed');
+      if (contextCollapsed) localStorage.removeItem('crm_contextVisible');
+      else localStorage.setItem('crm_contextVisible', '1');
     } catch {
       // localStorage unavailable (private mode, quota, etc.)
     }
