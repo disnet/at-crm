@@ -1,24 +1,22 @@
-name: Deploy to Cloudflare Pages
+name: Deploy appview Worker
 
 on:
   push:
     branches:
       - main
-  pull_request:
+    paths:
+      - 'appview/**'
+      - '.github/workflows/deploy-appview.yml'
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+      name: production
       url: ${{ steps.deploy.outputs.deployment-url }}
-    env:
-      PUBLIC_APP_ORIGIN: ${{ vars.PUBLIC_APP_ORIGIN }}
-      PUBLIC_APPVIEW_URL: ${{ vars.PUBLIC_APPVIEW_URL }}
     permissions:
       contents: read
-      deployments: write
 
     steps:
       - name: Check out repository
@@ -29,21 +27,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: appview/package-lock.json
 
-      - name: Install dependencies
+      - name: Install appview dependencies
+        working-directory: appview
         run: npm ci
 
-      - name: Validate app
-        run: npm run check
-
-      - name: Build app
-        run: npm run build
-
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy Worker
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          command: pages deploy .svelte-kit/cloudflare --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          workingDirectory: appview
+          command: deploy
