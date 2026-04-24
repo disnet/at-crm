@@ -210,6 +210,12 @@ export async function fetchSifaProfileFromAppview(
 ): Promise<SifaProfileData | null> {
   if (!SIFA_APPVIEW) return null;
 
+  // Contrail's generated listRecords wraps each row as
+  // `{ uri, did, collection, rkey, cid, record, time_us }` — note `record`,
+  // not the standard atproto `com.atproto.repo.listRecords` `value` field.
+  // If Contrail ever changes this envelope we want to fail loudly rather
+  // than silently return empty profiles, so we assert the shape on any
+  // non-empty page.
   const listAll = async <T>(shortName: string): Promise<T[]> => {
     const records: T[] = [];
     let cursor: string | undefined;
@@ -221,6 +227,11 @@ export async function fetchSifaProfileFromAppview(
       if (!res.ok) throw new Error(`appview ${shortName}: ${res.status}`);
       const data = (await res.json()) as { records?: { record: T }[]; cursor?: string };
       const page = data.records ?? [];
+      if (page.length > 0 && !('record' in page[0])) {
+        throw new Error(
+          `appview ${shortName}: unexpected envelope (missing 'record' field)`
+        );
+      }
       for (const r of page) records.push(r.record);
       if (!data.cursor || page.length === 0) break;
       cursor = data.cursor;
@@ -249,7 +260,8 @@ export async function fetchSifaProfileFromAppview(
       skills,
       externalAccounts
     });
-  } catch {
+  } catch (err) {
+    console.warn(`[atproto] sifa appview fetch failed for ${did}, falling back to PDS`, err);
     return null;
   }
 }
