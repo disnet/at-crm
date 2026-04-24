@@ -60,7 +60,16 @@ Jetstream ingestion runs automatically via the `*/1 * * * *` cron.
 
 ## Why separate from the SvelteKit app?
 
-The SvelteKit project uses `@sveltejs/adapter-static` — there is no
-server runtime to host Contrail inside. Rather than switch adapters and
-re-work the `client-metadata.json` prerender, the appview lives here as
-its own Worker.
+The SvelteKit app also deploys to Cloudflare (via `adapter-cloudflare`),
+so co-hosting Contrail alongside it is technically possible. We keep
+them apart because the appview has a different lifecycle:
+
+- Its own `*/1 * * * *` Jetstream cron — collapsing would mean adding a
+  `scheduled` handler to the SvelteKit Worker via a custom `_worker.js`
+  wrapper, coupling ingestion to the UI's cold-start path.
+- Its own D1 binding, schema, and one-shot `sync.ts` backfill tool.
+- A distinct scaling profile: steady ingestion traffic vs. bursty UI
+  requests.
+
+The UI talks to this Worker as an XRPC appview over HTTPS, which is
+the same shape it would use for any other atproto appview.
