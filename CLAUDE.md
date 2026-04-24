@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository layout
 
-- `app/` — the SvelteKit project. **All commands below run from `app/`.**
+- The SvelteKit project lives at the repo root. **All commands below run from the repo root.**
 - `design-sketch/` — original PDF/Sketch source for the visual direction (reference only).
 - `.impeccable.md` — design brief at the repo root. Treat it as load-bearing: brand voice, palette intent, and design principles live here, not in code comments. Read it before any UI change.
 
@@ -13,7 +13,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Package manager is **npm**. Lockfile is `package-lock.json`. `.npmrc` sets `ignore-scripts=true`, so install-time scripts from dependencies are blocked; none of the current deps need them. If a new dep ever requires an install script, add `@lavamoat/allow-scripts` with an explicit allowlist rather than removing `ignore-scripts`.
 
 ```sh
-cd app
 npm install
 npm run dev          # vite dev server
 npm run build        # production build
@@ -22,7 +21,7 @@ npm run check        # svelte-kit sync + svelte-check (type + Svelte diagnostics
 npm run check:watch  # same, in watch mode
 ```
 
-There is no test runner, no linter, and no formatter configured. `npm run check` is the only correctness gate.
+There is no test runner. `npm run check` is the primary correctness gate; `npm run lint` and `npm run format` are available as quality tools.
 
 ## Architecture
 
@@ -44,7 +43,7 @@ All visual styling is hand-rolled CSS (no Tailwind, no UI kit). The complete tok
 - **Colors are OKLCH**, all warm-tinted (~55–70° hue). There is no dark mode and no pure black/white/cool gray — the design brief explicitly forbids them.
 - **Typography**: `Young Serif` (display) and `Hanken Grotesk` (body), loaded from Google Fonts in `src/app.html`. Don't reach for Inter/DM Sans/system defaults.
 - **Icons**: `@lucide/svelte` for all UI chrome. Emoji is reserved for user-generated content (messages, notes typed by a person) — never use it in chrome.
-- Source-color tokens (`--src-bluesky`, `--src-email`, etc.) are the *only* loud colors. Treat them as punctuation against the warm-paper neutrals.
+- Source-color tokens (`--src-bluesky`, `--src-email`, etc.) are the _only_ loud colors. Treat them as punctuation against the warm-paper neutrals.
 
 Per-component styles use scoped `<style>` blocks and reference the tokens — don't hard-code colors, spacing, radii, or shadows. The token scale (`--sp-*`, `--r-*`, `--fs-*`, `--elev-*`, `--dur-*`, `--ease-*`) is the contract.
 

@@ -96,7 +96,7 @@
       contact={activeContact}
       onOpenProfile={() => (screen = 'profile')}
       onQuickCapture={() => (quickOpen = true)}
-      contextCollapsed={contextCollapsed}
+      {contextCollapsed}
       onToggleContext={() => (contextCollapsed = !contextCollapsed)}
     />
     {#if !contextCollapsed}

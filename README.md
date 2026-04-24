@@ -6,14 +6,13 @@ Built as a Svelte 5 SPA with an in-memory dataset. No backend, no team features.
 
 ## Layout
 
-- `app/` — the SvelteKit project
+- `src/`, `static/`, and the Node/Svelte config files live at the repo root
 - `design-sketch/` — PDF/Sketch source for the visual direction
 - `.impeccable.md` — design brief (brand voice, palette, principles)
 
 ## Running
 
 ```sh
-cd app
 npm install
 npm run dev      # dev server
 npm run build    # production build
