@@ -1,27 +1,15 @@
-import { error, json } from '@sveltejs/kit';
-import { building } from '$app/environment';
+import { json } from '@sveltejs/kit';
 import { env as publicEnv } from '$env/dynamic/public';
 import { env as privateEnv } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
-export const prerender = true;
-
-export const GET: RequestHandler = () => {
+export const GET: RequestHandler = ({ url }) => {
   // Precedence:
   //  1. PUBLIC_APP_ORIGIN — explicit override for custom production domains.
-  //  2. CF_PAGES_URL — Cloudflare Pages auto-exposes this at build time; it's
-  //     the unique URL for this deployment (preview or *.pages.dev prod).
-  const raw = publicEnv.PUBLIC_APP_ORIGIN || privateEnv.CF_PAGES_URL;
-  if (!raw) {
-    if (building) {
-      throw new Error(
-        'No origin configured. Set PUBLIC_APP_ORIGIN to your deployment URL ' +
-          '(e.g. https://crm.example.com), or rely on CF_PAGES_URL on Cloudflare Pages.'
-      );
-    }
-    // Dev server: this endpoint is unused (loopback handles local OAuth).
-    error(404, 'client-metadata.json is only generated for production builds');
-  }
+  //  2. CF_PAGES_URL — Cloudflare Pages auto-exposes this to Pages Functions
+  //     at runtime; it's the unique URL for this deployment.
+  //  3. url.origin — final fallback for preview deploys without either env var.
+  const raw = publicEnv.PUBLIC_APP_ORIGIN || privateEnv.CF_PAGES_URL || url.origin;
   const origin = raw.replace(/\/+$/, '');
   if (!/^https:\/\//.test(origin)) {
     throw new Error(`Origin must be an https:// URL, got "${raw}"`);
