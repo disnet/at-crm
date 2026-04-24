@@ -1,18 +1,25 @@
 {
-  "name": "at-crm-appview",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-12-25",
-  "observability": {
-    "enabled": true
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "at-crm-appview",
-      "database_id": "YOUR_DATABASE_ID"
-    }
-  ],
-  "triggers": {
-    "crons": ["*/1 * * * *"]
-  }
+	"name": "at-crm-appview",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-12-25",
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "at-crm-appview",
+			"database_id": "YOUR_DATABASE_ID"
+		},
+		{
+			"binding": "at_crm_appview",
+			"database_name": "at-crm-appview",
+			"database_id": "a82f6da3-1e9a-491b-b264-cfcc51927679"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"*/1 * * * *"
+		]
+	}
 }
