@@ -5,15 +5,21 @@ import { config } from './config';
 const contrail = new Contrail(config);
 const handle = createHandler(contrail);
 
-let initialized = false;
+// `contrail.init()` is idempotent (schema bootstraps use `CREATE TABLE IF NOT
+// EXISTS`), but we still coalesce concurrent callers through a shared promise
+// so a cold isolate doesn't fire two overlapping schema runs against D1.
+let initPromise: Promise<void> | null = null;
 
 type Env = { DB: D1Database };
 
-async function ensureInit(env: Env): Promise<void> {
-  if (!initialized) {
-    await contrail.init(env.DB);
-    initialized = true;
+function ensureInit(env: Env): Promise<void> {
+  if (!initPromise) {
+    initPromise = contrail.init(env.DB).catch((err) => {
+      initPromise = null;
+      throw err;
+    });
   }
+  return initPromise;
 }
 
 export default {
