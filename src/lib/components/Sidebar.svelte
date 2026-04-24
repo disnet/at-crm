@@ -4,19 +4,43 @@
   import IconBtn from './IconBtn.svelte';
   import SearchIcon from '@lucide/svelte/icons/search';
   import BellIcon from '@lucide/svelte/icons/bell';
-  import SettingsIcon from '@lucide/svelte/icons/settings';
+  import LogOutIcon from '@lucide/svelte/icons/log-out';
+  import LoaderIcon from '@lucide/svelte/icons/loader-circle';
   import PlusIcon from '@lucide/svelte/icons/plus';
   import type { Contact } from '$lib/data';
+  import type { AuthUser } from '$lib/auth';
 
   type Props = {
     contacts: Contact[];
     activeId: string | null;
+    user: AuthUser;
+    signingOut?: boolean;
     onSelect: (id: string) => void;
     onSearch: () => void;
     onReminders: () => void;
     onAddPerson: () => void;
+    onSignOut: () => void;
   };
-  let { contacts, activeId, onSelect, onSearch, onReminders, onAddPerson }: Props = $props();
+  let {
+    contacts,
+    activeId,
+    user,
+    signingOut = false,
+    onSelect,
+    onSearch,
+    onReminders,
+    onAddPerson,
+    onSignOut
+  }: Props = $props();
+
+  let meName = $derived(user.displayName?.trim() || user.handle);
+  let meInitials = $derived(
+    (user.displayName?.trim() || user.handle)
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() ?? '')
+      .join('') || '··'
+  );
 
   let totalReminders = $derived(contacts.filter((c) => c.reminder).length);
 
@@ -93,13 +117,21 @@
   </div>
 
   <footer class="foot">
-    <Avatar initials="YO" color="var(--accent)" size={28} />
+    {#if user.avatar}
+      <img class="me-avatar" src={user.avatar} alt="" />
+    {:else}
+      <Avatar initials={meInitials} color="var(--accent)" size={28} />
+    {/if}
     <div class="me">
-      <div class="me-name">You</div>
-      <div class="me-sub">Personal account</div>
+      <div class="me-name">{meName}</div>
+      <div class="me-sub">@{user.handle}</div>
     </div>
-    <IconBtn label="Settings" onclick={() => {}}>
-      <SettingsIcon size={15} strokeWidth={2} />
+    <IconBtn label={signingOut ? 'Signing out…' : 'Sign out'} onclick={signingOut ? () => {} : onSignOut}>
+      {#if signingOut}
+        <span class="spin"><LoaderIcon size={15} strokeWidth={2} /></span>
+      {:else}
+        <LogOutIcon size={15} strokeWidth={2} />
+      {/if}
     </IconBtn>
   </footer>
 </aside>
@@ -261,10 +293,35 @@
     font-weight: 600;
     color: var(--text);
     letter-spacing: -0.005em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .me-sub {
     font-size: 10.5px;
     color: var(--text-muted);
     margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .me-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow:
+      inset 0 0 0 1px oklch(100% 0 0 / 0.1),
+      var(--elev-1);
+  }
+  .spin {
+    display: inline-flex;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

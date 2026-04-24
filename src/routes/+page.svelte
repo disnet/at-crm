@@ -8,9 +8,12 @@
   import QuickCapture from '$lib/components/QuickCapture.svelte';
   import AddPersonOverlay from '$lib/components/AddPersonOverlay.svelte';
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { liveQuery, type Subscription } from 'dexie';
   import { db } from '$lib/db';
   import type { Contact } from '$lib/data';
+  import { getUser, clearUser, type AuthUser } from '$lib/auth';
+  import { getOAuthClient } from '$lib/oauth';
 
   type Screen = 'thread' | 'profile';
 
@@ -22,10 +25,19 @@
   let quickOpen = $state(false);
   let addPersonOpen = $state(false);
   let contextCollapsed = $state(false);
+  let user = $state<AuthUser | null>(null);
+  let signingOut = $state(false);
 
   let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
 
   onMount(() => {
+    const u = getUser();
+    if (!u) {
+      goto('/login');
+      return;
+    }
+    user = u;
+
     try {
       const saved = localStorage.getItem('crm_activeId');
       if (saved) activeId = saved;
@@ -77,16 +89,41 @@
     activeId = id;
     screen = 'thread';
   }
+
+  async function signOut() {
+    if (signingOut) return;
+    signingOut = true;
+    const u = user;
+    try {
+      if (u) {
+        try {
+          const client = await getOAuthClient();
+          await client.revoke(u.did);
+        } catch (err) {
+          console.warn('Remote revoke failed; clearing local session anyway', err);
+        }
+      }
+    } finally {
+      clearUser();
+      user = null;
+      signingOut = false;
+      await goto('/login');
+    }
+  }
 </script>
 
+{#if user}
 <div class="shell">
   <Sidebar
     {contacts}
     {activeId}
+    {user}
+    {signingOut}
     onSelect={selectContact}
     onSearch={() => (searchOpen = true)}
     onReminders={() => (remindersOpen = true)}
     onAddPerson={() => (addPersonOpen = true)}
+    onSignOut={signOut}
   />
 
   {#if screen === 'profile' && activeContact}
@@ -116,6 +153,7 @@
 {/if}
 {#if addPersonOpen}
   <AddPersonOverlay onClose={() => (addPersonOpen = false)} onAdded={selectContact} />
+{/if}
 {/if}
 
 <style>
