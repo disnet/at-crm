@@ -34,17 +34,17 @@ Set these in the appropriate environment before enabling the workflow:
 - Secret `CLOUDFLARE_API_TOKEN`
 - Secret `CLOUDFLARE_ACCOUNT_ID`
 - Variable `CLOUDFLARE_PAGES_PROJECT_NAME`
-- Variable `PUBLIC_APP_ORIGIN`
+- Variable `PUBLIC_APP_ORIGIN` (production only — optional for `preview`)
 
-The workflow builds the app with `npm run build` and deploys the generated `build/` directory to Cloudflare Pages:
+The workflow builds the app with `npm run build` and deploys the adapter-cloudflare output (`.svelte-kit/cloudflare/`) to Cloudflare Pages:
 
 - `main` pushes and manual runs use the `production` environment
 - pull requests use the `preview` environment
 
-`PUBLIC_APP_ORIGIN` must be the full HTTPS origin used to serve that environment, because the build prerenders `client-metadata.json` for AT Protocol OAuth. Examples:
+`client-metadata.json` is served by a Pages Function that derives its origin from the incoming request, so preview deploys self-resolve to their unique per-deployment URL — no need to hard-code a `PUBLIC_APP_ORIGIN` for each preview. Set `PUBLIC_APP_ORIGIN` in the `production` environment to pin metadata at your custom domain:
 
 - `production`: `https://crm.example.com`
-- `preview`: your preview hostname for that environment
+- `preview`: leave `PUBLIC_APP_ORIGIN` unset; the Function falls back to the request origin.
 
 The GitHub Environment URL is populated from the Cloudflare deployment returned by Wrangler.
 
