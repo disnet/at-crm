@@ -41,10 +41,12 @@ The workflow builds the app with `npm run build` and deploys the adapter-cloudfl
 - `main` pushes and manual runs use the `production` environment
 - pull requests use the `preview` environment
 
-`client-metadata.json` is served by a Pages Function that derives its origin from the incoming request, so preview deploys self-resolve to their unique per-deployment URL — no need to hard-code a `PUBLIC_APP_ORIGIN` for each preview. Set `PUBLIC_APP_ORIGIN` in the `production` environment to pin metadata at your custom domain:
+`client-metadata.json` is served by a Pages Function. Its origin is resolved with this precedence:
 
-- `production`: `https://crm.example.com`
-- `preview`: leave `PUBLIC_APP_ORIGIN` unset; the Function falls back to the request origin.
+1. `PUBLIC_APP_ORIGIN` — explicit override, e.g. when multiple hostnames are bound to the same deployment and you want metadata to pin to one of them.
+2. The incoming request's origin — works for the project alias (`<project>.pages.dev`), per-deployment preview URLs, and any custom domain you bind, with no per-environment config.
+
+In most cases leave `PUBLIC_APP_ORIGIN` unset and let the request origin win.
 
 The GitHub Environment URL is populated from the Cloudflare deployment returned by Wrangler.
 
