@@ -210,24 +210,34 @@ export async function fetchSifaProfileFromAppview(
 ): Promise<SifaProfileData | null> {
   if (!SIFA_APPVIEW) return null;
 
-  const listOne = async <T>(shortName: string): Promise<T[]> => {
-    const url = `${SIFA_APPVIEW}/xrpc/id.sifa.${shortName}.listRecords?did=${encodeURIComponent(did)}&limit=100`;
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`appview ${shortName}: ${res.status}`);
-    const data = (await res.json()) as { records?: { record: T }[] };
-    return (data.records ?? []).map((r) => r.record);
+  const listAll = async <T>(shortName: string): Promise<T[]> => {
+    const records: T[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 10; i++) {
+      const params = new URLSearchParams({ did, limit: '100' });
+      if (cursor) params.set('cursor', cursor);
+      const url = `${SIFA_APPVIEW}/xrpc/id.sifa.${shortName}.listRecords?${params}`;
+      const res = await fetch(url, { signal });
+      if (!res.ok) throw new Error(`appview ${shortName}: ${res.status}`);
+      const data = (await res.json()) as { records?: { record: T }[]; cursor?: string };
+      const page = data.records ?? [];
+      for (const r of page) records.push(r.record);
+      if (!data.cursor || page.length === 0) break;
+      cursor = data.cursor;
+    }
+    return records;
   };
 
   try {
     const [selfList, positions, education, projects, publications, skills, externalAccounts] =
       await Promise.all([
-        listOne<SifaSelfData>('self'),
-        listOne<SifaPosition>('position'),
-        listOne<SifaEducation>('education'),
-        listOne<SifaProject>('project'),
-        listOne<SifaPublication>('publication'),
-        listOne<SifaSkill>('skill'),
-        listOne<SifaExternalAccount>('externalAccount')
+        listAll<SifaSelfData>('self'),
+        listAll<SifaPosition>('position'),
+        listAll<SifaEducation>('education'),
+        listAll<SifaProject>('project'),
+        listAll<SifaPublication>('publication'),
+        listAll<SifaSkill>('skill'),
+        listAll<SifaExternalAccount>('externalAccount')
       ]);
 
     return orderSifa({
