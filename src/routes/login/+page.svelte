@@ -11,7 +11,7 @@
   import Avatar from '$lib/components/Avatar.svelte';
   import { getProfile, searchActorsTypeahead, type ActorTypeahead } from '$lib/atproto';
   import { setUser } from '$lib/auth';
-  import { getOAuthClient } from '$lib/oauth';
+  import { getOAuthClient, isRecoverableOAuthClientError } from '$lib/oauth';
 
   function hasCallbackParams(): boolean {
     if (typeof window === 'undefined') return false;
@@ -33,8 +33,7 @@
 
   onMount(async () => {
     try {
-      const client = await getOAuthClient();
-      const result = await client.init();
+      const result = await initOAuth();
       if (result?.session) {
         await persistSession(result.session.sub);
         await goto('/');
@@ -71,12 +70,29 @@
     error = null;
     try {
       const client = await getOAuthClient();
-      await client.signInRedirect(handle);
+      try {
+        await client.signInRedirect(handle);
+      } catch (err) {
+        if (!isRecoverableOAuthClientError(err)) throw err;
+        const freshClient = await getOAuthClient({ forceFresh: true });
+        await freshClient.signInRedirect(handle);
+      }
       // signInRedirect navigates away; this line is unreachable on success.
     } catch (err) {
       console.error('OAuth signIn failed', err);
       error = oauthError(err);
       submitting = false;
+    }
+  }
+
+  async function initOAuth() {
+    const client = await getOAuthClient();
+    try {
+      return await client.init();
+    } catch (err) {
+      if (!isRecoverableOAuthClientError(err)) throw err;
+      const freshClient = await getOAuthClient({ forceFresh: true });
+      return await freshClient.init();
     }
   }
 

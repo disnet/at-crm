@@ -2,6 +2,10 @@ import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 
 let clientPromise: Promise<BrowserOAuthClient> | null = null;
 
+type OAuthClientOptions = {
+  forceFresh?: boolean;
+};
+
 /**
  * Lazily construct the atproto OAuth client. Must be called from the browser.
  * - localhost / 127.0.0.1 dev: uses the loopback client_id with our Vite port
@@ -9,7 +13,20 @@ let clientPromise: Promise<BrowserOAuthClient> | null = null;
  *   so IndexedDB origins line up between auth start and callback.
  * - Production: expects a hosted `client-metadata.json` at the site root.
  */
-export function getOAuthClient(): Promise<BrowserOAuthClient> {
+export function resetOAuthClient(): void {
+  clientPromise = null;
+}
+
+export function isRecoverableOAuthClientError(err: unknown): boolean {
+  const msg = (err as { message?: string } | null)?.message?.toLowerCase() ?? '';
+  return /database (?:is )?closed|disposed|invalidstateerror/.test(msg);
+}
+
+export function getOAuthClient(options: OAuthClientOptions = {}): Promise<BrowserOAuthClient> {
+  if (options.forceFresh) {
+    resetOAuthClient();
+  }
+
   if (!clientPromise) {
     const { origin, hostname, port, protocol } = window.location;
     const isLoopback =
@@ -32,6 +49,9 @@ export function getOAuthClient(): Promise<BrowserOAuthClient> {
     clientPromise = BrowserOAuthClient.load({
       clientId,
       handleResolver: 'https://bsky.social'
+    }).catch((err) => {
+      resetOAuthClient();
+      throw err;
     });
   }
   return clientPromise;
