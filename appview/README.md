@@ -1,0 +1,66 @@
+# at-crm-appview
+
+A [Contrail](https://github.com/flo-bit/contrail) appview that indexes the
+`id.sifa.profile.*` collections the CRM reads when it adds a Bluesky
+contact. The Worker exposes typed XRPC endpoints under the `id.sifa`
+namespace, so the client can fetch a full profile in a single request
+instead of walking each user's PDS for seven `listRecords` calls.
+
+## XRPC endpoints
+
+Once deployed, Contrail auto-generates `listRecords` and `getRecord`
+routes per collection under the configured namespace:
+
+```
+/xrpc/id.sifa.self.listRecords?did=<did>
+/xrpc/id.sifa.position.listRecords?did=<did>
+/xrpc/id.sifa.education.listRecords?did=<did>
+/xrpc/id.sifa.project.listRecords?did=<did>
+/xrpc/id.sifa.publication.listRecords?did=<did>
+/xrpc/id.sifa.skill.listRecords?did=<did>
+/xrpc/id.sifa.externalAccount.listRecords?did=<did>
+```
+
+Contrail's `listRecords` accepts `?did=<did>` or `?actor=<handle>`
+natively and will backfill a user's records from their PDS on the
+first query — so profiles appear even for DIDs the Jetstream cron
+hasn't seen yet.
+
+## Setup
+
+```sh
+npm install
+
+# Create the D1 database, then copy the reported database_id into
+# wrangler.jsonc's d1_databases[0].database_id.
+npx wrangler d1 create at-crm-appview
+```
+
+## Develop
+
+```sh
+npm run sync      # discover + backfill against local D1
+npm run dev       # local worker with Jetstream cron every minute
+```
+
+Probe it:
+
+```sh
+curl "http://localhost:8787/xrpc/id.sifa.self.listRecords?did=did:plc:..."
+```
+
+## Deploy
+
+```sh
+npm run deploy
+npm run sync:remote
+```
+
+Jetstream ingestion runs automatically via the `*/1 * * * *` cron.
+
+## Why separate from the SvelteKit app?
+
+The SvelteKit project uses `@sveltejs/adapter-static` — there is no
+server runtime to host Contrail inside. Rather than switch adapters and
+re-work the `client-metadata.json` prerender, the appview lives here as
+its own Worker.
