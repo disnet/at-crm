@@ -1,9 +1,12 @@
 /**
  * Minimal AT Protocol client.
- * Uses Bluesky's public app view for actor lookups, then resolves the user's
- * PDS via their DID document so we can read sifa.id records directly.
+ * Uses Bluesky's public app view for actor lookups. For sifa.id profile data
+ * we prefer our own Contrail-backed appview (a single request per collection
+ * against one XRPC host); if that's not configured or fails we fall back to
+ * resolving the user's PDS via their DID document and reading records directly.
  */
 
+import { env as publicEnv } from '$env/dynamic/public';
 import type {
   SifaSelfData,
   SifaPosition,
@@ -17,6 +20,9 @@ import type {
 
 const APPVIEW = 'https://public.api.bsky.app';
 const PLC = 'https://plc.directory';
+
+/** Origin of our Contrail-backed sifa appview, e.g. https://at-crm-appview.workers.dev */
+const SIFA_APPVIEW = publicEnv.PUBLIC_APPVIEW_URL?.replace(/\/$/, '') || '';
 
 export type ActorTypeahead = {
   did: string;
@@ -119,6 +125,42 @@ async function listAllRecords<T>(
   return out;
 }
 
+const sortByDateDesc = (a?: string, b?: string): number => {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return b.localeCompare(a);
+};
+
+function orderSifa(partial: Omit<SifaProfileData, 'fetchedAt'>): SifaProfileData {
+  const positions = [...partial.positions].sort((a, b) => {
+    if (!!a.endedAt !== !!b.endedAt) return a.endedAt ? 1 : -1;
+    if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+    return sortByDateDesc(a.startedAt, b.startedAt);
+  });
+  const education = [...partial.education].sort((a, b) =>
+    sortByDateDesc(a.endedAt ?? a.startedAt, b.endedAt ?? b.startedAt)
+  );
+  const projects = [...partial.projects].sort((a, b) => sortByDateDesc(a.startedAt, b.startedAt));
+  const publications = [...partial.publications].sort((a, b) =>
+    sortByDateDesc(a.publishedAt, b.publishedAt)
+  );
+  const externalAccounts = [...partial.externalAccounts].sort(
+    (a, b) => Number(!!b.isPrimary) - Number(!!a.isPrimary)
+  );
+
+  return {
+    self: partial.self,
+    positions,
+    education,
+    projects,
+    publications,
+    skills: partial.skills,
+    externalAccounts,
+    fetchedAt: new Date().toISOString()
+  };
+}
+
 export async function fetchSifaProfile(
   did: string,
   signal?: AbortSignal
@@ -142,31 +184,62 @@ export async function fetchSifaProfile(
       ).catch(() => [])
     ]);
 
-  const sortByDateDesc = (a?: string, b?: string): number => {
-    if (!a && !b) return 0;
-    if (!a) return 1;
-    if (!b) return -1;
-    return b.localeCompare(a);
-  };
-
-  positions.sort((a, b) => {
-    if (!!a.endedAt !== !!b.endedAt) return a.endedAt ? 1 : -1;
-    if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
-    return sortByDateDesc(a.startedAt, b.startedAt);
-  });
-  education.sort((a, b) => sortByDateDesc(a.endedAt ?? a.startedAt, b.endedAt ?? b.startedAt));
-  projects.sort((a, b) => sortByDateDesc(a.startedAt, b.startedAt));
-  publications.sort((a, b) => sortByDateDesc(a.publishedAt, b.publishedAt));
-  externalAccounts.sort((a, b) => Number(!!b.isPrimary) - Number(!!a.isPrimary));
-
-  return {
+  return orderSifa({
     self,
     positions,
     education,
     projects,
     publications,
     skills,
-    externalAccounts,
-    fetchedAt: new Date().toISOString()
+    externalAccounts
+  });
+}
+
+/**
+ * Fetch a sifa profile from the Contrail-backed appview if one is configured.
+ * Returns null when `PUBLIC_APPVIEW_URL` is unset or the appview is
+ * unreachable — callers should fall back to {@link fetchSifaProfile}.
+ *
+ * Contrail's auto-generated `<ns>.<shortName>.listRecords` endpoint accepts
+ * `?did=<did>` and will trigger a PDS backfill on first query, so profiles
+ * are available even for DIDs Jetstream hasn't seen yet.
+ */
+export async function fetchSifaProfileFromAppview(
+  did: string,
+  signal?: AbortSignal
+): Promise<SifaProfileData | null> {
+  if (!SIFA_APPVIEW) return null;
+
+  const listOne = async <T>(shortName: string): Promise<T[]> => {
+    const url = `${SIFA_APPVIEW}/xrpc/id.sifa.${shortName}.listRecords?did=${encodeURIComponent(did)}&limit=100`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) throw new Error(`appview ${shortName}: ${res.status}`);
+    const data = (await res.json()) as { records?: { record: T }[] };
+    return (data.records ?? []).map((r) => r.record);
   };
+
+  try {
+    const [selfList, positions, education, projects, publications, skills, externalAccounts] =
+      await Promise.all([
+        listOne<SifaSelfData>('self'),
+        listOne<SifaPosition>('position'),
+        listOne<SifaEducation>('education'),
+        listOne<SifaProject>('project'),
+        listOne<SifaPublication>('publication'),
+        listOne<SifaSkill>('skill'),
+        listOne<SifaExternalAccount>('externalAccount')
+      ]);
+
+    return orderSifa({
+      self: selfList[0] ?? null,
+      positions,
+      education,
+      projects,
+      publications,
+      skills,
+      externalAccounts
+    });
+  } catch {
+    return null;
+  }
 }
