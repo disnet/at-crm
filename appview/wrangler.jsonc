@@ -7,7 +7,7 @@
   },
   "d1_databases": [
     {
-      "binding": "at_crm_appview",
+      "binding": "DB",
       "database_name": "at-crm-appview",
       "database_id": "a82f6da3-1e9a-491b-b264-cfcc51927679"
     }
