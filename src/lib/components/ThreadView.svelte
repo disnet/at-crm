@@ -13,6 +13,8 @@
   import BookOpenIcon from '@lucide/svelte/icons/book-open';
   import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
   import PanelRightOpenIcon from '@lucide/svelte/icons/panel-right-open';
+  import RefreshIcon from '@lucide/svelte/icons/refresh-cw';
+  import LoaderIcon from '@lucide/svelte/icons/loader-circle';
   import {
     isMessage,
     isNote,
@@ -27,11 +29,20 @@
     contact: Contact | null;
     onOpenProfile: () => void;
     onQuickCapture: () => void;
+    onRefreshBluesky?: (contactId: string) => void;
+    bskyRefreshing?: boolean;
     contextCollapsed: boolean;
     onToggleContext: () => void;
   };
-  let { contact, onOpenProfile, onQuickCapture, contextCollapsed, onToggleContext }: Props =
-    $props();
+  let {
+    contact,
+    onOpenProfile,
+    onQuickCapture,
+    onRefreshBluesky,
+    bskyRefreshing = false,
+    contextCollapsed,
+    onToggleContext
+  }: Props = $props();
 
   type View = 'index' | SourceKey;
   let activeSource = $state<View>('index');
@@ -149,6 +160,22 @@
           onclick={() => (activeSource = src)}
         />
       {/each}
+      {#if activeSource === 'bluesky' && onRefreshBluesky}
+        <button
+          type="button"
+          class="tab-action"
+          aria-label="Refresh Bluesky DMs"
+          title="Refresh Bluesky DMs"
+          disabled={bskyRefreshing}
+          onclick={() => onRefreshBluesky?.(contact.id)}
+        >
+          {#if bskyRefreshing}
+            <span class="spin"><LoaderIcon size={12} strokeWidth={2.2} /></span>
+          {:else}
+            <RefreshIcon size={12} strokeWidth={2.2} />
+          {/if}
+        </button>
+      {/if}
     </nav>
 
     <!-- Sticky reminder -->
@@ -368,6 +395,36 @@
     height: 18px;
     background: var(--border);
     margin: 0 4px;
+  }
+  .tab-action {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--r-sm);
+    color: var(--text-subtle);
+    transition:
+      color var(--dur-fast),
+      background var(--dur-fast);
+  }
+  .tab-action:hover:not(:disabled) {
+    color: var(--text-strong);
+    background: var(--bg-dim);
+  }
+  .tab-action:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .spin {
+    display: inline-flex;
+    animation: tab-spin 0.9s linear infinite;
+  }
+  @keyframes tab-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* Reminder bar */

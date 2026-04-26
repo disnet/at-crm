@@ -1,6 +1,8 @@
 import Dexie, { type Table } from 'dexie';
+import type { OAuthSession } from '@atproto/oauth-client-browser';
 import {
   formatAddress,
+  isMessage,
   type AtmoSource,
   type Contact,
   type Message,
@@ -9,9 +11,29 @@ import {
 } from './data';
 import { fetchSifaProfile, getProfile, type ActorTypeahead } from './atproto';
 import { findAtmosphereMutuals, mapWithLimit } from './atmo';
+import {
+  ChatScopeError,
+  listConvos,
+  listMessages,
+  type ChatMember,
+  type ChatMessageView,
+  type ConvoView
+} from './bskyChat';
+
+/**
+ * Per-convo sync bookmark. We store the convo's `rev` from listConvos so the
+ * next sync can short-circuit unchanged threads, and the contact id so a
+ * per-contact refresh action can map back to its convo without rescanning.
+ */
+export type ConvoSyncRecord = {
+  convoId: string;
+  contactId: string;
+  rev: string;
+};
 
 class CrmDB extends Dexie {
   contacts!: Table<Contact, string>;
+  convos!: Table<ConvoSyncRecord, string>;
 
   constructor() {
     super('crm');
@@ -33,6 +55,9 @@ class CrmDB extends Dexie {
             if (!c.discoveredVia) c.discoveredVia = 'manual';
           })
       );
+    // v4 adds the convos sync table — per-convo `rev` cursor lets repeated
+    // syncs skip threads that haven't moved since last fetch.
+    this.version(4).stores({ contacts: 'id, order', convos: 'convoId, contactId' });
   }
 }
 
@@ -81,8 +106,7 @@ export async function addContactFromDid(did: string, opts: AddContactOpts = {}):
   ]);
 
   const handle = profile?.handle ?? opts.handleHint ?? did;
-  const name =
-    profile?.displayName?.trim() || opts.displayNameHint?.trim() || handle;
+  const name = profile?.displayName?.trim() || opts.displayNameHint?.trim() || handle;
 
   const primaryPosition =
     sifa?.positions.find((p) => p.isPrimary && !p.endedAt) ??
@@ -388,6 +412,234 @@ export async function sendMockMessage(
     };
     await appendToThread(contactId, source, reply, previewOf(replyText));
   }, 1400);
+}
+
+function formatChatTime(sentAt: string): string {
+  const d = new Date(sentAt);
+  if (Number.isNaN(d.getTime())) return sentAt;
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function pickPeer(members: ChatMember[], userDid: string): ChatMember | null {
+  const others = members.filter((m) => m.did !== userDid);
+  // 1:1 DMs are the supported case. Group convos exist in lex but the CRM is
+  // person-keyed — pick the first non-self member and treat it as the contact.
+  // If we can't find a peer (e.g. self-message), bail.
+  return others[0] ?? null;
+}
+
+async function ensureContactFromMember(member: ChatMember): Promise<Contact> {
+  const existing = await db.contacts.get(member.did);
+  if (existing) {
+    // Convo response has fresh handle/avatar; refresh them in case the user
+    // renamed since the contact was first seeded.
+    const patch: Partial<Contact> = {};
+    if (member.handle && member.handle !== existing.handle) patch.handle = member.handle;
+    if (member.avatar && member.avatar !== existing.avatarUrl) patch.avatarUrl = member.avatar;
+    if (Object.keys(patch).length > 0) await db.contacts.update(member.did, patch);
+    return { ...existing, ...patch };
+  }
+
+  return addContactFromDid(member.did, {
+    handleHint: member.handle,
+    avatarHint: member.avatar,
+    displayNameHint: member.displayName,
+    discoveredVia: 'manual'
+  });
+}
+
+function mergeBlueskyThread(
+  existing: (Message | NoteEntry)[] | undefined,
+  realMessages: Message[]
+): (Message | NoteEntry)[] {
+  // Real chat ids are deterministic (e.g. tids). Mock-sent messages use
+  // randomUUID/`id_*` strings — they won't collide. Drop any existing entry
+  // whose id matches an incoming real message so re-syncs don't duplicate,
+  // then preserve any locally-added Notes/mocks that aren't part of the real
+  // history.
+  const realIds = new Set(realMessages.map((m) => m.id));
+  const localOnly = (existing ?? []).filter((entry) => !realIds.has(entry.id));
+  // Mock messages don't carry a sortable timestamp, so we keep them after the
+  // real history. Acceptable for the prototype — once real messages arrive,
+  // the mock turns are the trailing footnote rather than getting interleaved.
+  const realMsgs: (Message | NoteEntry)[] = realMessages;
+  const localNotes = localOnly.filter((entry) => !isMessage(entry));
+  const localMessages = localOnly.filter(isMessage);
+  return [...realMsgs, ...localNotes, ...localMessages];
+}
+
+async function applyConvoToContact(
+  convo: ConvoView,
+  peer: ChatMember,
+  rawMessages: ChatMessageView[],
+  userDid: string
+): Promise<{ contactId: string; lastMessage: Message | null }> {
+  const contact = await ensureContactFromMember(peer);
+
+  const realMessages: Message[] = rawMessages.map((m) => ({
+    id: m.id,
+    dir: m.sender.did === userDid ? 'out' : 'in',
+    text: m.text,
+    ts: formatChatTime(m.sentAt)
+  }));
+
+  const fresh = await db.contacts.get(contact.id);
+  if (!fresh) return { contactId: contact.id, lastMessage: null };
+
+  const mergedThread = mergeBlueskyThread(fresh.threads.bluesky, realMessages);
+  const sources = fresh.sources.includes('bluesky')
+    ? fresh.sources
+    : [...fresh.sources, 'bluesky' as SourceKey];
+
+  const last = realMessages[realMessages.length - 1] ?? null;
+  const lastSentAt = rawMessages[rawMessages.length - 1]?.sentAt;
+
+  const patch: Partial<Contact> = {
+    threads: { ...fresh.threads, bluesky: mergedThread },
+    sources
+  };
+  if (last) {
+    patch.lastMsg = previewOf(last.text);
+    if (lastSentAt) {
+      const d = new Date(lastSentAt);
+      if (!Number.isNaN(d.getTime())) patch.lastActive = d.toLocaleDateString();
+    }
+  }
+  if (typeof convo.unreadCount === 'number') patch.unread = convo.unreadCount;
+
+  await db.contacts.update(contact.id, patch);
+  return { contactId: contact.id, lastMessage: last };
+}
+
+export type BlueskyDMSyncResult = {
+  /** Convos walked from listConvos (capped by MAX_PAGES). */
+  convos: number;
+  /** Convos that produced a new or updated contact this run. */
+  updated: number;
+  /** Convos skipped because the user had never sent a message there — these
+   *  shouldn't become contacts per the product rule. */
+  skippedNotSelfSent: number;
+};
+
+const BSKY_DM_SYNC_KEY_PREFIX = 'crm_bskyDmSyncedAt';
+const BSKY_DM_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5m
+
+function dmSyncKey(did: string): string {
+  return `${BSKY_DM_SYNC_KEY_PREFIX}:${did}`;
+}
+
+/**
+ * Walk every convo for the signed-in user, materialise contacts + threads for
+ * any convo where the user has sent at least one message (the "I've already
+ * sent a DM to" rule), and bookmark each convo's `rev` so the next sync only
+ * re-fetches threads that have moved.
+ */
+export async function syncBlueskyDMs(
+  session: OAuthSession,
+  user: { did: string },
+  opts: { force?: boolean; signal?: AbortSignal } = {}
+): Promise<BlueskyDMSyncResult> {
+  const { signal } = opts;
+  const syncKey = dmSyncKey(user.did);
+  if (!opts.force) {
+    try {
+      const last = Number(localStorage.getItem(syncKey) ?? '0');
+      if (last && Date.now() - last < BSKY_DM_SYNC_INTERVAL_MS) {
+        return { convos: 0, updated: 0, skippedNotSelfSent: 0 };
+      }
+    } catch {
+      // localStorage unavailable — proceed anyway.
+    }
+  }
+
+  let convos = 0;
+  let updated = 0;
+  let skippedNotSelfSent = 0;
+
+  for await (const convo of listConvos(session, signal)) {
+    if (signal?.aborted) break;
+    convos++;
+
+    const peer = pickPeer(convo.members ?? [], user.did);
+    if (!peer) continue;
+
+    const stored = await db.convos.get(convo.id);
+    // If we've already bookmarked this convo at the same rev, no new messages
+    // exist — skip regardless of contact state. "They-only" convos (no user
+    // reply yet) have no contact by design; requiring `existingContact` here
+    // would re-paginate their full history every sync window.
+    if (stored && stored.rev === convo.rev) continue;
+
+    const messages = await listMessages(session, convo.id, signal).catch((err) => {
+      if (err instanceof ChatScopeError) throw err;
+      console.warn('listMessages failed for convo', convo.id, err);
+      return null;
+    });
+    if (!messages) continue;
+    if (signal?.aborted) break;
+
+    const userHasSent = messages.some((m) => m.sender.did === user.did);
+    if (!userHasSent) {
+      skippedNotSelfSent++;
+      // Still bookmark the rev so we don't repeatedly re-fetch the same
+      // unchanged "they messaged me but I haven't replied" thread. If the
+      // user sends a message later, the rev will advance and we'll pick it
+      // up on the next pass.
+      await db.convos.put({ convoId: convo.id, contactId: peer.did, rev: convo.rev });
+      continue;
+    }
+
+    await applyConvoToContact(convo, peer, messages, user.did);
+    await db.convos.put({ convoId: convo.id, contactId: peer.did, rev: convo.rev });
+    updated++;
+  }
+
+  if (!signal?.aborted) {
+    try {
+      localStorage.setItem(syncKey, String(Date.now()));
+    } catch {
+      // localStorage unavailable — the next run will just re-sync.
+    }
+  }
+
+  return { convos, updated, skippedNotSelfSent };
+}
+
+/**
+ * Per-contact resync: looks up the stored convo for `contactId` and refetches
+ * its messages. Falls back to a full sync if we don't have a convo bookmark
+ * yet (e.g. a manually-added contact that we know has DMs but haven't synced).
+ */
+export async function refreshBlueskyContactDMs(
+  session: OAuthSession,
+  user: { did: string },
+  contactId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const bookmark = await db.convos.where('contactId').equals(contactId).first();
+  if (!bookmark) {
+    await syncBlueskyDMs(session, user, { force: true, signal });
+    return;
+  }
+  const messages = await listMessages(session, bookmark.convoId, signal);
+  if (signal?.aborted) return;
+  const contact = await db.contacts.get(contactId);
+  if (!contact) return;
+  const peer: ChatMember = {
+    did: contact.did,
+    handle: contact.handle,
+    displayName: contact.name,
+    avatar: contact.avatarUrl
+  };
+  // We don't have the fresh ConvoView rev here without listConvos; bump the
+  // bookmark to a sentinel that forces the next full sync to revisit. The
+  // next listConvos walk will overwrite it with the authoritative rev.
+  await applyConvoToContact(
+    { id: bookmark.convoId, rev: bookmark.rev, members: [peer] },
+    peer,
+    messages,
+    user.did
+  );
 }
 
 export async function refreshSifa(did: string, signal?: AbortSignal): Promise<void> {

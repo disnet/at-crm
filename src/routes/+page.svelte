@@ -10,10 +10,12 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { liveQuery, type Subscription } from 'dexie';
-  import { db, syncAtmosphereMutuals } from '$lib/db';
+  import { db, refreshBlueskyContactDMs, syncAtmosphereMutuals, syncBlueskyDMs } from '$lib/db';
+  import { ChatScopeError } from '$lib/bskyChat';
   import type { Contact } from '$lib/data';
   import { getUser, clearUser, type AuthUser } from '$lib/auth';
   import { getOAuthClient } from '$lib/oauth';
+  import { getSession, resetSession } from '$lib/session';
 
   type Screen = 'thread' | 'profile';
 
@@ -28,6 +30,7 @@
   let user = $state<AuthUser | null>(null);
   let signingOut = $state(false);
   let syncingMutuals = $state(false);
+  let syncingDMs = $state(false);
   const syncAbort = new AbortController();
 
   let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
@@ -76,6 +79,8 @@
         syncingMutuals = false;
       });
 
+    void syncDMs(u);
+
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -113,6 +118,53 @@
     screen = 'thread';
   }
 
+  async function syncDMs(u: AuthUser, opts: { force?: boolean } = {}): Promise<void> {
+    if (syncAbort.signal.aborted) return;
+    syncingDMs = true;
+    try {
+      const session = await getSession(u.did);
+      if (!session) return;
+      await syncBlueskyDMs(session, u, { signal: syncAbort.signal, force: opts.force });
+    } catch (err) {
+      if (syncAbort.signal.aborted) return;
+      if (err instanceof ChatScopeError) {
+        // User signed in before we asked for transition:chat.bsky. Drop the
+        // local session and bounce them through OAuth so the new scope is
+        // granted on the way back.
+        console.warn('Bluesky DM scope missing; redirecting to login');
+        resetSession();
+        clearUser();
+        await goto('/login');
+        return;
+      }
+      console.warn('Bluesky DM sync failed', err);
+    } finally {
+      syncingDMs = false;
+    }
+  }
+
+  async function refreshContactDMs(contactId: string): Promise<void> {
+    const u = user;
+    if (!u || syncAbort.signal.aborted) return;
+    syncingDMs = true;
+    try {
+      const session = await getSession(u.did);
+      if (!session) return;
+      await refreshBlueskyContactDMs(session, u, contactId, syncAbort.signal);
+    } catch (err) {
+      if (syncAbort.signal.aborted) return;
+      if (err instanceof ChatScopeError) {
+        resetSession();
+        clearUser();
+        await goto('/login');
+        return;
+      }
+      console.warn('Bluesky DM refresh failed', err);
+    } finally {
+      syncingDMs = false;
+    }
+  }
+
   async function signOut() {
     if (signingOut) return;
     signingOut = true;
@@ -128,6 +180,7 @@
         }
       }
     } finally {
+      resetSession();
       clearUser();
       user = null;
       signingOut = false;
@@ -137,48 +190,51 @@
 </script>
 
 {#if user}
-<div class="shell">
-  <Sidebar
-    {contacts}
-    {activeId}
-    {user}
-    {signingOut}
-    {syncingMutuals}
-    onSelect={selectContact}
-    onSearch={() => (searchOpen = true)}
-    onReminders={() => (remindersOpen = true)}
-    onAddPerson={() => (addPersonOpen = true)}
-    onSignOut={signOut}
-  />
-
-  {#if screen === 'profile' && activeContact}
-    <ProfileView contact={activeContact} onBack={() => (screen = 'thread')} />
-  {:else}
-    <ThreadView
-      contact={activeContact}
-      onOpenProfile={() => (screen = 'profile')}
-      onQuickCapture={() => (quickOpen = true)}
-      {contextCollapsed}
-      onToggleContext={() => (contextCollapsed = !contextCollapsed)}
+  <div class="shell">
+    <Sidebar
+      {contacts}
+      {activeId}
+      {user}
+      {signingOut}
+      {syncingMutuals}
+      {syncingDMs}
+      onSelect={selectContact}
+      onSearch={() => (searchOpen = true)}
+      onReminders={() => (remindersOpen = true)}
+      onAddPerson={() => (addPersonOpen = true)}
+      onSignOut={signOut}
     />
-    {#if !contextCollapsed}
-      <ContextPanel contact={activeContact} onOpenProfile={() => (screen = 'profile')} />
-    {/if}
-  {/if}
-</div>
 
-{#if searchOpen}
-  <SearchOverlay {contacts} onClose={() => (searchOpen = false)} onSelect={selectContact} />
-{/if}
-{#if remindersOpen}
-  <RemindersPanel {contacts} onClose={() => (remindersOpen = false)} onSelect={selectContact} />
-{/if}
-{#if quickOpen}
-  <QuickCapture onClose={() => (quickOpen = false)} />
-{/if}
-{#if addPersonOpen}
-  <AddPersonOverlay onClose={() => (addPersonOpen = false)} onAdded={selectContact} />
-{/if}
+    {#if screen === 'profile' && activeContact}
+      <ProfileView contact={activeContact} onBack={() => (screen = 'thread')} />
+    {:else}
+      <ThreadView
+        contact={activeContact}
+        onOpenProfile={() => (screen = 'profile')}
+        onQuickCapture={() => (quickOpen = true)}
+        onRefreshBluesky={refreshContactDMs}
+        bskyRefreshing={syncingDMs}
+        {contextCollapsed}
+        onToggleContext={() => (contextCollapsed = !contextCollapsed)}
+      />
+      {#if !contextCollapsed}
+        <ContextPanel contact={activeContact} onOpenProfile={() => (screen = 'profile')} />
+      {/if}
+    {/if}
+  </div>
+
+  {#if searchOpen}
+    <SearchOverlay {contacts} onClose={() => (searchOpen = false)} onSelect={selectContact} />
+  {/if}
+  {#if remindersOpen}
+    <RemindersPanel {contacts} onClose={() => (remindersOpen = false)} onSelect={selectContact} />
+  {/if}
+  {#if quickOpen}
+    <QuickCapture onClose={() => (quickOpen = false)} />
+  {/if}
+  {#if addPersonOpen}
+    <AddPersonOverlay onClose={() => (addPersonOpen = false)} onAdded={selectContact} />
+  {/if}
 {/if}
 
 <style>
