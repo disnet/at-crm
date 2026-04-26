@@ -1,0 +1,32 @@
+{
+  "id": "id.sifa.graph.follow",
+  "defs": {
+    "main": {
+      "key": "tid",
+      "type": "record",
+      "record": {
+        "type": "object",
+        "required": [
+          "subject",
+          "createdAt"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the user being followed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Client-declared timestamp when this follow was created."
+          }
+        }
+      },
+      "description": "Record representing a professional follow relationship. Lives in the follower's PDS."
+    }
+  },
+  "$type": "com.atproto.lexicon.schema",
+  "lexicon": 1,
+  "description": "A one-way professional follow. Indicates the follower wants to see the subject's professional content on Sifa."
+}
