@@ -564,11 +564,11 @@ export async function syncBlueskyDMs(
     if (!peer) continue;
 
     const stored = await db.convos.get(convo.id);
-    const existingContact = await db.contacts.get(peer.did);
-    // Skip the message fetch when the convo's rev hasn't moved AND we already
-    // know about this contact — otherwise we'd never seed a contact for an
-    // unchanged historical convo on first sync.
-    if (stored && stored.rev === convo.rev && existingContact) continue;
+    // If we've already bookmarked this convo at the same rev, no new messages
+    // exist — skip regardless of contact state. "They-only" convos (no user
+    // reply yet) have no contact by design; requiring `existingContact` here
+    // would re-paginate their full history every sync window.
+    if (stored && stored.rev === convo.rev) continue;
 
     const messages = await listMessages(session, convo.id, signal).catch((err) => {
       if (err instanceof ChatScopeError) throw err;
