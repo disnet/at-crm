@@ -59,6 +59,15 @@
 
     syncingMutuals = true;
     syncAtmosphereMutuals(u, { signal: syncAbort.signal })
+      .then((result) => {
+        const capped = Object.keys(result.truncated);
+        if (capped.length > 0) {
+          console.warn(
+            `Atmosphere mutual sync hit pagination caps for: ${capped.join(', ')}. ` +
+              'Some mutuals may be missing — see FOLLOW_CAP / BSKY_GRAPH_MAX_PAGES.'
+          );
+        }
+      })
       .catch((err) => {
         if (syncAbort.signal.aborted) return;
         console.warn('Atmosphere mutual sync failed', err);

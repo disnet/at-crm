@@ -22,6 +22,11 @@ import type { AtmoSource } from './data';
 const SIFA_FOLLOW_NSID = 'id.sifa.graph.follow';
 const TANGLED_FOLLOW_NSID = 'sh.tangled.graph.follow';
 
+// Pairwise mutual lookup checks each candidate's PDS for a return follow
+// record, so the cost is O(N) PDS round-trips. We cap the number of outgoing
+// follows we'll verify so a heavy user doesn't fan out into thousands of
+// requests on every sync; mutuals beyond the cap are silently omitted but the
+// `truncated` flag on the result surfaces it to the caller.
 const FOLLOW_CAP = 500;
 const PAIRWISE_CONCURRENCY = 6;
 
@@ -43,14 +48,16 @@ export async function mapWithLimit<T, R>(
   return out;
 }
 
-async function bskyMutuals(did: string, signal?: AbortSignal): Promise<Set<string>> {
+type MutualSet = { ids: Set<string>; truncated: boolean };
+
+async function bskyMutuals(did: string, signal?: AbortSignal): Promise<MutualSet> {
   const [follows, followers] = await Promise.all([
-    getBlueskyFollows(did, signal).catch(() => new Set<string>()),
-    getBlueskyFollowers(did, signal).catch(() => new Set<string>())
+    getBlueskyFollows(did, signal).catch(() => ({ ids: new Set<string>(), truncated: false })),
+    getBlueskyFollowers(did, signal).catch(() => ({ ids: new Set<string>(), truncated: false }))
   ]);
-  const out = new Set<string>();
-  for (const d of follows) if (followers.has(d)) out.add(d);
-  return out;
+  const ids = new Set<string>();
+  for (const d of follows.ids) if (followers.ids.has(d)) ids.add(d);
+  return { ids, truncated: follows.truncated || followers.truncated };
 }
 
 /**
@@ -63,78 +70,100 @@ async function pairwiseMutuals(
   user: { did: string; pds: string },
   collection: string,
   signal?: AbortSignal
-): Promise<Set<string>> {
+): Promise<MutualSet> {
   const candidates = await listFollowSubjects(user.pds, user.did, collection, signal).catch(
-    () => new Set<string>()
+    () => ({ ids: new Set<string>(), truncated: false })
   );
-  if (candidates.size === 0) return new Set<string>();
+  if (candidates.ids.size === 0) {
+    return { ids: new Set<string>(), truncated: candidates.truncated };
+  }
 
-  const list = Array.from(candidates).slice(0, FOLLOW_CAP);
+  const all = Array.from(candidates.ids);
+  const list = all.slice(0, FOLLOW_CAP);
+  // Either upstream pagination capped, or we capped here.
+  const truncated = candidates.truncated || all.length > FOLLOW_CAP;
   const results = await mapWithLimit(list, PAIRWISE_CONCURRENCY, async (cand) => {
     try {
       const candPds = await resolvePds(cand, signal);
       const candFollows = await listFollowSubjects(candPds, cand, collection, signal);
-      return candFollows.has(user.did) ? cand : null;
+      return candFollows.ids.has(user.did) ? cand : null;
     } catch {
       return null;
     }
   });
-  const out = new Set<string>();
-  for (const did of results) if (did) out.add(did);
-  return out;
+  const ids = new Set<string>();
+  for (const did of results) if (did) ids.add(did);
+  return { ids, truncated };
 }
+
+export type AtmoMutualsResult = {
+  /** did → list of platforms the user is mutuals with this person on */
+  mutuals: Map<string, AtmoSource[]>;
+  /** Per-platform truncation: true if upstream/cap limited the search and there
+   *  are likely more mutuals than we discovered. */
+  truncated: Partial<Record<AtmoSource, boolean>>;
+};
+
+const EMPTY_SET: MutualSet = { ids: new Set<string>(), truncated: false };
 
 /**
  * Compute a `did → AtmoSource[]` map of every mutual connection across
  * supported platforms. Each platform fails soft: if the user has no Sifa
  * presence, the Sifa entry is just empty.
+ *
+ * The `truncated` map flags platforms where pagination caps (Bluesky's
+ * BSKY_GRAPH_MAX_PAGES, the per-platform FOLLOW_CAP for pairwise lookups) may
+ * have hidden additional mutuals. Callers can surface this so power users
+ * understand why someone they follow doesn't appear yet.
  */
 export async function findAtmosphereMutuals(
   user: { did: string },
   signal?: AbortSignal
-): Promise<Map<string, AtmoSource[]>> {
+): Promise<AtmoMutualsResult> {
   const pds = await resolvePds(user.did, signal).catch(() => null);
   const collections = pds
     ? await listRepoCollections(pds, user.did, signal).catch(() => [])
     : [];
   const has = (nsid: string) => collections.includes(nsid);
 
-  const tasks: Promise<{ source: AtmoSource; mutuals: Set<string> }>[] = [];
+  const tasks: Promise<{ source: AtmoSource; result: MutualSet }>[] = [];
 
   tasks.push(
     bskyMutuals(user.did, signal)
-      .catch(() => new Set<string>())
-      .then((mutuals) => ({ source: 'bluesky' as const, mutuals }))
+      .catch(() => EMPTY_SET)
+      .then((result) => ({ source: 'bluesky' as const, result }))
   );
 
   if (pds && has(SIFA_FOLLOW_NSID)) {
     tasks.push(
       pairwiseMutuals({ did: user.did, pds }, SIFA_FOLLOW_NSID, signal)
-        .catch(() => new Set<string>())
-        .then((mutuals) => ({ source: 'sifa' as const, mutuals }))
+        .catch(() => EMPTY_SET)
+        .then((result) => ({ source: 'sifa' as const, result }))
     );
   }
 
   if (pds && has(TANGLED_FOLLOW_NSID)) {
     tasks.push(
       pairwiseMutuals({ did: user.did, pds }, TANGLED_FOLLOW_NSID, signal)
-        .catch(() => new Set<string>())
-        .then((mutuals) => ({ source: 'tangled' as const, mutuals }))
+        .catch(() => EMPTY_SET)
+        .then((result) => ({ source: 'tangled' as const, result }))
     );
   }
 
-  const results = await Promise.all(tasks);
-  const merged = new Map<string, AtmoSource[]>();
-  for (const { source, mutuals } of results) {
-    for (const did of mutuals) {
+  const taskResults = await Promise.all(tasks);
+  const mutuals = new Map<string, AtmoSource[]>();
+  const truncated: Partial<Record<AtmoSource, boolean>> = {};
+  for (const { source, result } of taskResults) {
+    if (result.truncated) truncated[source] = true;
+    for (const did of result.ids) {
       if (did === user.did) continue;
-      const prior = merged.get(did);
+      const prior = mutuals.get(did);
       if (prior) {
         if (!prior.includes(source)) prior.push(source);
       } else {
-        merged.set(did, [source]);
+        mutuals.set(did, [source]);
       }
     }
   }
-  return merged;
+  return { mutuals, truncated };
 }

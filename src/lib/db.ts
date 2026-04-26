@@ -158,6 +158,9 @@ export type AtmoSyncResult = {
   added: number;
   annotated: number;
   total: number;
+  /** Platforms whose follow lists we couldn't exhaustively fetch — there are
+   *  likely additional mutuals beyond what was synced. */
+  truncated: Partial<Record<AtmoSource, boolean>>;
 };
 
 const MUTUAL_SEED_CONCURRENCY = 6;
@@ -232,21 +235,21 @@ export async function syncAtmosphereMutuals(
     try {
       const last = Number(localStorage.getItem(syncKey) ?? '0');
       if (last && Date.now() - last < ATMO_SYNC_INTERVAL_MS) {
-        return { added: 0, annotated: 0, total: 0 };
+        return { added: 0, annotated: 0, total: 0, truncated: {} };
       }
     } catch {
       // localStorage unavailable — proceed anyway.
     }
   }
 
-  const mutuals = await findAtmosphereMutuals(user, signal);
-  if (signal?.aborted) return { added: 0, annotated: 0, total: 0 };
+  const { mutuals, truncated } = await findAtmosphereMutuals(user, signal);
+  if (signal?.aborted) return { added: 0, annotated: 0, total: 0, truncated };
 
   // Annotate existing contacts up front (cheap — local DB only).
   let annotated = 0;
   const toSeed: Array<{ did: string; sources: AtmoSource[] }> = [];
   for (const [did, sources] of mutuals) {
-    if (signal?.aborted) return { added: 0, annotated, total: mutuals.size };
+    if (signal?.aborted) return { added: 0, annotated, total: mutuals.size, truncated };
     const existing = await db.contacts.get(did);
     if (existing) {
       const merged = mergeAtmoSources(existing.mutualSources, sources);
@@ -265,7 +268,7 @@ export async function syncAtmosphereMutuals(
     seedMutualContact(did, sources, signal).catch(() => false)
   );
   const added = seeded.filter(Boolean).length;
-  if (signal?.aborted) return { added, annotated, total: mutuals.size };
+  if (signal?.aborted) return { added, annotated, total: mutuals.size, truncated };
 
   // Hydrate Sifa for newly-seeded contacts in the background. Fire-and-forget
   // so the sync pill clears as soon as the basic profiles land; Sifa pickups
@@ -285,7 +288,7 @@ export async function syncAtmosphereMutuals(
     }
   }
 
-  return { added, annotated, total: mutuals.size };
+  return { added, annotated, total: mutuals.size, truncated };
 }
 
 function newId(): string {
