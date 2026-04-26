@@ -7,8 +7,23 @@ Built as a Svelte 5 SPA with an in-memory dataset. No backend, no team features.
 ## Layout
 
 - `src/`, `static/`, and the Node/Svelte config files live at the repo root
+- `appview/` — Contrail-backed Cloudflare Worker that indexes `id.sifa.profile.*` records for the "add contact" flow. See [`appview/README.md`](./appview/README.md).
 - `design-sketch/` — PDF/Sketch source for the visual direction
 - `.impeccable.md` — design brief (brand voice, palette, principles)
+
+## Sifa appview
+
+When a Bluesky handle is added as a contact, the app tries our Contrail
+appview first (one request per sifa collection, hitting one host) and
+falls back to walking the user's PDS directly if the appview is
+unreachable or not configured. Configure with:
+
+```sh
+# .env / CI
+PUBLIC_APPVIEW_URL=https://your-appview.workers.dev
+```
+
+Leaving `PUBLIC_APPVIEW_URL` unset keeps the original PDS-walk behavior.
 
 ## Running
 

@@ -1,6 +1,17 @@
 import Dexie, { type Table } from 'dexie';
 import { formatAddress, type Contact, type Message, type NoteEntry, type SourceKey } from './data';
-import { fetchSifaProfile, getProfile, type ActorTypeahead } from './atproto';
+import {
+  fetchSifaProfile,
+  fetchSifaProfileFromAppview,
+  getProfile,
+  type ActorTypeahead
+} from './atproto';
+
+async function loadSifaProfile(did: string) {
+  const viaAppview = await fetchSifaProfileFromAppview(did).catch(() => null);
+  if (viaAppview) return viaAppview;
+  return fetchSifaProfile(did).catch(() => null);
+}
 
 class CrmDB extends Dexie {
   contacts!: Table<Contact, string>;
@@ -37,7 +48,7 @@ export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Cont
 
   const [profile, sifa] = await Promise.all([
     getProfile(actor.did).catch(() => null),
-    fetchSifaProfile(actor.did).catch(() => null)
+    loadSifaProfile(actor.did)
   ]);
 
   const name = profile?.displayName?.trim() || actor.displayName?.trim() || actor.handle;
@@ -190,7 +201,7 @@ export async function sendMockMessage(
 export async function refreshSifa(did: string): Promise<void> {
   const existing = await db.contacts.get(did);
   if (!existing) return;
-  const sifa = await fetchSifaProfile(did).catch(() => null);
+  const sifa = await loadSifaProfile(did);
   if (!sifa) return;
   await db.contacts.update(did, {
     sifa,

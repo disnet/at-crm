@@ -1,0 +1,77 @@
+name: Deploy appview Worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'appview/**'
+      - '.github/workflows/deploy-appview.yml'
+  pull_request:
+    paths:
+      - 'appview/**'
+      - '.github/workflows/deploy-appview.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: appview/package-lock.json
+
+      - name: Install appview dependencies
+        working-directory: appview
+        run: npm ci
+
+      - name: Dry-run Worker deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: appview
+          command: deploy --dry-run
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: appview/package-lock.json
+
+      - name: Install appview dependencies
+        working-directory: appview
+        run: npm ci
+
+      - name: Deploy Worker
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: appview
+          command: deploy
