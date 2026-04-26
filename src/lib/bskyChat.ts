@@ -48,8 +48,12 @@ export class ChatScopeError extends Error {
 
 type XrpcError = { error?: string; message?: string };
 
-function looksLikeScopeError(status: number, body: XrpcError | null): boolean {
-  if (status === 403) return true;
+// Only treat a response as a scope error when the body actually says so —
+// the chat XRPC also returns 403 for non-scope reasons (e.g. a single
+// restricted/blocked convo). A blanket `status === 403 → scope error` would
+// sign the user out mid-sync on any such convo, so we look at the error code
+// and message instead. `status` is taken for completeness but isn't decisive.
+function looksLikeScopeError(_status: number, body: XrpcError | null): boolean {
   const error = body?.error ?? '';
   const message = body?.message ?? '';
   if (/InvalidToken|InsufficientScope|ExpiredToken/i.test(error)) return true;
