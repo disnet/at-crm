@@ -1,6 +1,14 @@
 import Dexie, { type Table } from 'dexie';
-import { formatAddress, type Contact, type Message, type NoteEntry, type SourceKey } from './data';
+import {
+  formatAddress,
+  type AtmoSource,
+  type Contact,
+  type Message,
+  type NoteEntry,
+  type SourceKey
+} from './data';
 import { fetchSifaProfile, getProfile, type ActorTypeahead } from './atproto';
+import { findAtmosphereMutuals } from './atmo';
 
 class CrmDB extends Dexie {
   contacts!: Table<Contact, string>;
@@ -8,14 +16,30 @@ class CrmDB extends Dexie {
   constructor() {
     super('crm');
     this.version(1).stores({ contacts: 'id, order' });
-    // v2 reshapes Contact (drops mock seed + adds sifa). Old rows are stale — clear.
+    // v2 reshaped Contact (drops mock seed + adds sifa). Old rows were stale — cleared.
     this.version(2)
       .stores({ contacts: 'id, order' })
       .upgrade((tx) => tx.table('contacts').clear());
+    // v3 adds mutualSources / discoveredVia. Existing rows backfill in place
+    // — they were added manually, so default discoveredVia to 'manual'.
+    this.version(3)
+      .stores({ contacts: 'id, order' })
+      .upgrade((tx) =>
+        tx
+          .table('contacts')
+          .toCollection()
+          .modify((c: Contact) => {
+            if (!Array.isArray(c.mutualSources)) c.mutualSources = [];
+            if (!c.discoveredVia) c.discoveredVia = 'manual';
+          })
+      );
   }
 }
 
 export const db = new CrmDB();
+
+const ATMO_SYNC_KEY = 'crm_atmoSyncedAt';
+const ATMO_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12h
 
 function initialsFrom(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -31,16 +55,26 @@ function avatarColorForDid(did: string): string {
   return `oklch(68% 0.13 ${hue})`;
 }
 
-export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Contact> {
-  const existing = await db.contacts.get(actor.did);
+export type AddContactOpts = {
+  handleHint?: string;
+  avatarHint?: string;
+  displayNameHint?: string;
+  mutualSources?: AtmoSource[];
+  discoveredVia?: 'manual' | 'mutual';
+};
+
+export async function addContactFromDid(did: string, opts: AddContactOpts = {}): Promise<Contact> {
+  const existing = await db.contacts.get(did);
   if (existing) return existing;
 
   const [profile, sifa] = await Promise.all([
-    getProfile(actor.did).catch(() => null),
-    fetchSifaProfile(actor.did).catch(() => null)
+    getProfile(did).catch(() => null),
+    fetchSifaProfile(did).catch(() => null)
   ]);
 
-  const name = profile?.displayName?.trim() || actor.displayName?.trim() || actor.handle;
+  const handle = profile?.handle ?? opts.handleHint ?? did;
+  const name =
+    profile?.displayName?.trim() || opts.displayNameHint?.trim() || handle;
 
   const primaryPosition =
     sifa?.positions.find((p) => p.isPrimary && !p.endedAt) ??
@@ -52,40 +86,121 @@ export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Cont
     sifa?.self?.headline?.trim() ||
     (primaryPosition ? `${primaryPosition.title} · ${primaryPosition.company}` : '') ||
     profile?.description?.split('\n')[0]?.trim() ||
-    `@${actor.handle}`;
+    `@${handle}`;
 
   const primaryExternal =
     sifa?.externalAccounts.find((e) => e.isPrimary) ?? sifa?.externalAccounts[0] ?? null;
 
-  const url = primaryExternal?.url || `https://bsky.app/profile/${actor.handle}`;
+  const url = primaryExternal?.url || `https://bsky.app/profile/${handle}`;
 
   const last = await db.contacts.orderBy('order').last();
   const order = (last?.order ?? 0) + 1;
 
   const contact: Contact = {
-    id: actor.did,
+    id: did,
     order,
-    did: actor.did,
-    handle: actor.handle,
+    did,
+    handle,
     name,
     initials: initialsFrom(name),
-    avatarColor: avatarColorForDid(actor.did),
-    avatarUrl: profile?.avatar ?? actor.avatar,
+    avatarColor: avatarColorForDid(did),
+    avatarUrl: profile?.avatar ?? opts.avatarHint,
     bio: profile?.description?.trim() || undefined,
     tagline,
     location: formatAddress(sifa?.self?.location),
     url,
     sources: ['bluesky'],
-    lastMsg: `@${actor.handle}`,
+    lastMsg: `@${handle}`,
     lastActive: 'Just added',
     unread: 0,
     reminder: null,
     threads: { bluesky: [] },
-    sifa
+    sifa,
+    mutualSources: opts.mutualSources ? [...opts.mutualSources] : [],
+    discoveredVia: opts.discoveredVia ?? 'manual'
   };
 
   await db.contacts.put(contact);
   return contact;
+}
+
+export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Contact> {
+  return addContactFromDid(actor.did, {
+    handleHint: actor.handle,
+    avatarHint: actor.avatar,
+    displayNameHint: actor.displayName,
+    discoveredVia: 'manual'
+  });
+}
+
+function mergeAtmoSources(prev: AtmoSource[] | undefined, incoming: AtmoSource[]): AtmoSource[] {
+  const order: AtmoSource[] = ['bluesky', 'sifa', 'tangled'];
+  const set = new Set<AtmoSource>(prev ?? []);
+  for (const s of incoming) set.add(s);
+  return order.filter((s) => set.has(s));
+}
+
+function sameAtmoSources(a: AtmoSource[], b: AtmoSource[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+export type AtmoSyncResult = {
+  added: number;
+  annotated: number;
+  total: number;
+};
+
+/**
+ * Discovers atmosphere mutuals for the signed-in user and seeds them as
+ * contacts (or annotates existing contacts with their mutual sources).
+ * Existing manual contacts keep `discoveredVia: 'manual'` — they just gain
+ * platform tags. Throttled to once per `ATMO_SYNC_INTERVAL_MS` per browser.
+ */
+export async function syncAtmosphereMutuals(
+  user: { did: string },
+  opts: { force?: boolean } = {}
+): Promise<AtmoSyncResult> {
+  if (!opts.force) {
+    try {
+      const last = Number(localStorage.getItem(ATMO_SYNC_KEY) ?? '0');
+      if (last && Date.now() - last < ATMO_SYNC_INTERVAL_MS) {
+        return { added: 0, annotated: 0, total: 0 };
+      }
+    } catch {
+      // localStorage unavailable — proceed anyway.
+    }
+  }
+
+  const mutuals = await findAtmosphereMutuals(user);
+  let added = 0;
+  let annotated = 0;
+
+  for (const [did, sources] of mutuals) {
+    const existing = await db.contacts.get(did);
+    if (existing) {
+      const merged = mergeAtmoSources(existing.mutualSources, sources);
+      if (!sameAtmoSources(existing.mutualSources ?? [], merged)) {
+        await db.contacts.update(did, { mutualSources: merged });
+        annotated++;
+      }
+    } else {
+      await addContactFromDid(did, {
+        mutualSources: sources,
+        discoveredVia: 'mutual'
+      });
+      added++;
+    }
+  }
+
+  try {
+    localStorage.setItem(ATMO_SYNC_KEY, String(Date.now()));
+  } catch {
+    // localStorage unavailable — the next run will just re-sync.
+  }
+
+  return { added, annotated, total: mutuals.size };
 }
 
 function newId(): string {

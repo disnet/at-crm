@@ -2,7 +2,8 @@
   import Avatar from './Avatar.svelte';
   import SourceDot from './SourceDot.svelte';
   import BellIcon from '@lucide/svelte/icons/bell';
-  import type { Contact } from '$lib/data';
+  import UsersIcon from '@lucide/svelte/icons/users';
+  import { ATMO_SOURCES, type Contact } from '$lib/data';
 
   type Props = {
     contact: Contact;
@@ -34,6 +35,17 @@
       {#each contact.sources as src (src)}
         <SourceDot source={src} />
       {/each}
+      {#if contact.mutualSources && contact.mutualSources.length > 0}
+        <span
+          class="mutual-mark"
+          aria-label="Mutual on {contact.mutualSources
+            .map((s) => ATMO_SOURCES[s].label)
+            .join(', ')}"
+          title="Mutual on {contact.mutualSources.map((s) => ATMO_SOURCES[s].label).join(', ')}"
+        >
+          <UsersIcon size={10} strokeWidth={2.2} />
+        </span>
+      {/if}
       {#if contact.reminder}
         <span class="reminder-mark" aria-label="Has reminder">
           <BellIcon size={10} strokeWidth={2.2} />
@@ -134,6 +146,12 @@
     display: inline-flex;
     align-items: center;
     color: var(--amber-deep);
+    margin-left: 1px;
+  }
+  .mutual-mark {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-subtle);
     margin-left: 1px;
   }
 </style>

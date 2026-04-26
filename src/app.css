@@ -45,6 +45,10 @@
   --src-signal-bg: oklch(95% 0.035 155);
   --src-notes: oklch(58% 0.1 78);
   --src-notes-bg: oklch(94% 0.04 78);
+  --src-sifa: oklch(56% 0.13 305);
+  --src-sifa-bg: oklch(95% 0.04 305);
+  --src-tangled: oklch(58% 0.13 350);
+  --src-tangled-bg: oklch(95% 0.04 350);
 
   /* Typography */
   --font-display: 'Young Serif', ui-serif, Georgia, serif;

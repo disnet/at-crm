@@ -96,11 +96,12 @@ async function listAllRecords<T>(
   pds: string,
   did: string,
   collection: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  maxPages = 10
 ): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | undefined;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < maxPages; i++) {
     const params = new URLSearchParams({
       repo: did,
       collection,
@@ -115,6 +116,74 @@ async function listAllRecords<T>(
     for (const r of data.records ?? []) out.push(r.value);
     if (!data.cursor || data.records.length === 0) break;
     cursor = data.cursor;
+  }
+  return out;
+}
+
+export async function listRepoCollections(
+  pds: string,
+  did: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const url = `${pds}/xrpc/com.atproto.repo.describeRepo?repo=${encodeURIComponent(did)}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { collections?: string[] };
+  return data.collections ?? [];
+}
+
+/**
+ * Paginates app.bsky.graph.getFollows / getFollowers against the public appview
+ * and returns the set of subject DIDs.
+ */
+async function listBskyGraphPage(
+  endpoint: 'getFollows' | 'getFollowers',
+  did: string,
+  signal?: AbortSignal,
+  maxPages = 8
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  let cursor: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const params = new URLSearchParams({ actor: did, limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const url = `${APPVIEW}/xrpc/app.bsky.graph.${endpoint}?${params}`;
+    const res = await fetch(url, { signal });
+    if (res.status === 400 || res.status === 404) return out;
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const key = endpoint === 'getFollows' ? 'follows' : 'followers';
+    const data = (await res.json()) as Record<string, unknown> & { cursor?: string };
+    const list = (data[key] as { did: string }[] | undefined) ?? [];
+    for (const a of list) if (a.did) out.add(a.did);
+    if (!data.cursor || list.length === 0) break;
+    cursor = data.cursor;
+  }
+  return out;
+}
+
+export async function getBlueskyFollows(did: string, signal?: AbortSignal): Promise<Set<string>> {
+  return listBskyGraphPage('getFollows', did, signal);
+}
+
+export async function getBlueskyFollowers(did: string, signal?: AbortSignal): Promise<Set<string>> {
+  return listBskyGraphPage('getFollowers', did, signal);
+}
+
+export async function listFollowSubjects(
+  pds: string,
+  did: string,
+  collection: string,
+  signal?: AbortSignal
+): Promise<Set<string>> {
+  // Follow records may carry the subject DID either inline (`subject: did`) or
+  // wrapped (`subject: { did }`) depending on the lexicon. Tolerate both.
+  type FollowRecord = { subject?: string | { did?: string } };
+  const records = await listAllRecords<FollowRecord>(pds, did, collection, signal, 6);
+  const out = new Set<string>();
+  for (const r of records) {
+    const s = r.subject;
+    if (typeof s === 'string') out.add(s);
+    else if (s && typeof s.did === 'string') out.add(s.did);
   }
   return out;
 }

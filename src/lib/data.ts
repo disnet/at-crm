@@ -14,6 +14,25 @@ export const SOURCES: Record<SourceKey, SourceConfig> = {
   notes: { label: 'Notes', color: 'var(--src-notes)', bg: 'var(--src-notes-bg)' }
 };
 
+/**
+ * Atmosphere platforms a contact may be a mutual on. Distinct from `SourceKey`,
+ * which describes message channels — a person can be a Bluesky mutual without
+ * us ever exchanging a Bluesky DM.
+ */
+export type AtmoSource = 'bluesky' | 'sifa' | 'tangled';
+
+export type AtmoSourceConfig = {
+  label: string;
+  color: string;
+  bg: string;
+};
+
+export const ATMO_SOURCES: Record<AtmoSource, AtmoSourceConfig> = {
+  bluesky: { label: 'Bluesky', color: 'var(--src-bluesky)', bg: 'var(--src-bluesky-bg)' },
+  sifa: { label: 'Sifa', color: 'var(--src-sifa)', bg: 'var(--src-sifa-bg)' },
+  tangled: { label: 'Tangled', color: 'var(--src-tangled)', bg: 'var(--src-tangled-bg)' }
+};
+
 export type Message = {
   id: string;
   dir: 'in' | 'out';
@@ -147,6 +166,10 @@ export type Contact = {
   reminder: ContactReminder | null;
   threads: Partial<Record<SourceKey, (Message | NoteEntry)[]>>;
   sifa: SifaProfileData | null;
+  /** Atmosphere platforms this person is a mutual on. */
+  mutualSources: AtmoSource[];
+  /** Whether we found this contact through manual lookup or mutual sync. */
+  discoveredVia: 'manual' | 'mutual';
 };
 
 export function isNote(entry: Message | NoteEntry): entry is NoteEntry {

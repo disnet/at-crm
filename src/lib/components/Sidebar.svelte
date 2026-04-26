@@ -15,6 +15,7 @@
     activeId: string | null;
     user: AuthUser;
     signingOut?: boolean;
+    syncingMutuals?: boolean;
     onSelect: (id: string) => void;
     onSearch: () => void;
     onReminders: () => void;
@@ -26,6 +27,7 @@
     activeId,
     user,
     signingOut = false,
+    syncingMutuals = false,
     onSelect,
     onSearch,
     onReminders,
@@ -74,6 +76,13 @@
       <kbd>⌘K</kbd>
     </button>
   </div>
+
+  {#if syncingMutuals}
+    <div class="sync-pill" role="status">
+      <span class="spin"><LoaderIcon size={11} strokeWidth={2.2} /></span>
+      <span>Finding atmosphere mutuals…</span>
+    </div>
+  {/if}
 
   <div class="list">
     {#if contacts.length === 0}
@@ -214,6 +223,23 @@
     padding: 2px 6px;
     border-radius: 4px;
     box-shadow: 0 0 0 1px var(--border);
+  }
+
+  .sync-pill {
+    margin: 0 12px 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: var(--r-pill);
+    background: var(--accent-wash);
+    color: var(--accent-ink);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    align-self: flex-start;
+    width: fit-content;
   }
 
   .list {

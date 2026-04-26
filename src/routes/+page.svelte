@@ -10,7 +10,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { liveQuery, type Subscription } from 'dexie';
-  import { db } from '$lib/db';
+  import { db, syncAtmosphereMutuals } from '$lib/db';
   import type { Contact } from '$lib/data';
   import { getUser, clearUser, type AuthUser } from '$lib/auth';
   import { getOAuthClient } from '$lib/oauth';
@@ -27,6 +27,7 @@
   let contextCollapsed = $state(true);
   let user = $state<AuthUser | null>(null);
   let signingOut = $state(false);
+  let syncingMutuals = $state(false);
 
   let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
 
@@ -54,6 +55,13 @@
         if (!activeId && val.length > 0) activeId = val[0].id;
       }
     });
+
+    syncingMutuals = true;
+    syncAtmosphereMutuals(u)
+      .catch((err) => console.warn('Atmosphere mutual sync failed', err))
+      .finally(() => {
+        syncingMutuals = false;
+      });
 
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -120,6 +128,7 @@
     {activeId}
     {user}
     {signingOut}
+    {syncingMutuals}
     onSelect={selectContact}
     onSearch={() => (searchOpen = true)}
     onReminders={() => (remindersOpen = true)}
