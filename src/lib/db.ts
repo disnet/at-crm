@@ -8,7 +8,7 @@ import {
   type SourceKey
 } from './data';
 import { fetchSifaProfile, getProfile, type ActorTypeahead } from './atproto';
-import { findAtmosphereMutuals } from './atmo';
+import { findAtmosphereMutuals, mapWithLimit } from './atmo';
 
 class CrmDB extends Dexie {
   contacts!: Table<Contact, string>;
@@ -160,6 +160,62 @@ export type AtmoSyncResult = {
   total: number;
 };
 
+const MUTUAL_SEED_CONCURRENCY = 6;
+const MUTUAL_HYDRATE_CONCURRENCY = 4;
+
+/**
+ * Seeds a Contact for a mutual using only the public Bluesky profile, deferring
+ * the much-heavier Sifa fan-out (PDS resolve + ~7 listRecords) to a follow-up
+ * pass. Lets the sync UI clear quickly even when the user has hundreds of
+ * mutuals; Sifa data fills in lazily.
+ */
+async function seedMutualContact(
+  did: string,
+  sources: AtmoSource[],
+  signal?: AbortSignal
+): Promise<boolean> {
+  if (signal?.aborted) return false;
+  const existing = await db.contacts.get(did);
+  if (existing) return false;
+
+  const profile = await getProfile(did, signal).catch(() => null);
+  if (signal?.aborted) return false;
+
+  const handle = profile?.handle ?? did;
+  const name = profile?.displayName?.trim() || handle;
+  const tagline = profile?.description?.split('\n')[0]?.trim() || `@${handle}`;
+
+  const last = await db.contacts.orderBy('order').last();
+  const order = (last?.order ?? 0) + 1;
+
+  const contact: Contact = {
+    id: did,
+    order,
+    did,
+    handle,
+    name,
+    initials: initialsFrom(name),
+    avatarColor: avatarColorForDid(did),
+    avatarUrl: profile?.avatar,
+    bio: profile?.description?.trim() || undefined,
+    tagline,
+    location: undefined,
+    url: `https://bsky.app/profile/${handle}`,
+    sources: ['bluesky'],
+    lastMsg: `@${handle}`,
+    lastActive: 'Just added',
+    unread: 0,
+    reminder: null,
+    threads: { bluesky: [] },
+    sifa: null,
+    mutualSources: [...sources],
+    discoveredVia: 'mutual'
+  };
+
+  await db.contacts.put(contact);
+  return true;
+}
+
 /**
  * Discovers atmosphere mutuals for the signed-in user and seeds them as
  * contacts (or annotates existing contacts with their mutual sources).
@@ -185,11 +241,12 @@ export async function syncAtmosphereMutuals(
 
   const mutuals = await findAtmosphereMutuals(user, signal);
   if (signal?.aborted) return { added: 0, annotated: 0, total: 0 };
-  let added = 0;
-  let annotated = 0;
 
+  // Annotate existing contacts up front (cheap — local DB only).
+  let annotated = 0;
+  const toSeed: Array<{ did: string; sources: AtmoSource[] }> = [];
   for (const [did, sources] of mutuals) {
-    if (signal?.aborted) return { added, annotated, total: mutuals.size };
+    if (signal?.aborted) return { added: 0, annotated, total: mutuals.size };
     const existing = await db.contacts.get(did);
     if (existing) {
       const merged = mergeAtmoSources(existing.mutualSources, sources);
@@ -198,14 +255,25 @@ export async function syncAtmosphereMutuals(
         annotated++;
       }
     } else {
-      await addContactFromDid(did, {
-        mutualSources: sources,
-        discoveredVia: 'mutual',
-        signal
-      });
-      added++;
+      toSeed.push({ did, sources });
     }
   }
+
+  // Seed minimal contacts in parallel — one Bluesky profile call each, no Sifa
+  // yet. Concurrency-limited so we don't hammer the appview.
+  const seeded = await mapWithLimit(toSeed, MUTUAL_SEED_CONCURRENCY, ({ did, sources }) =>
+    seedMutualContact(did, sources, signal).catch(() => false)
+  );
+  const added = seeded.filter(Boolean).length;
+  if (signal?.aborted) return { added, annotated, total: mutuals.size };
+
+  // Hydrate Sifa for newly-seeded contacts in the background. Fire-and-forget
+  // so the sync pill clears as soon as the basic profiles land; Sifa pickups
+  // ride on the same liveQuery into the UI when each row's update commits.
+  const seededDids = toSeed.filter((_, i) => seeded[i]).map((m) => m.did);
+  void mapWithLimit(seededDids, MUTUAL_HYDRATE_CONCURRENCY, (did) =>
+    refreshSifa(did, signal).catch(() => undefined)
+  );
 
   // If the caller bailed mid-flight, don't stamp the throttle — we want the
   // next mount to retry rather than skip-because-already-synced.
@@ -319,11 +387,12 @@ export async function sendMockMessage(
   }, 1400);
 }
 
-export async function refreshSifa(did: string): Promise<void> {
+export async function refreshSifa(did: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
   const existing = await db.contacts.get(did);
   if (!existing) return;
-  const sifa = await fetchSifaProfile(did).catch(() => null);
-  if (!sifa) return;
+  const sifa = await fetchSifaProfile(did, signal).catch(() => null);
+  if (!sifa || signal?.aborted) return;
   await db.contacts.update(did, {
     sifa,
     location: formatAddress(sifa.self?.location) ?? existing.location

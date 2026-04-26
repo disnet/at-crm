@@ -25,7 +25,7 @@ const TANGLED_FOLLOW_NSID = 'sh.tangled.graph.follow';
 const FOLLOW_CAP = 500;
 const PAIRWISE_CONCURRENCY = 6;
 
-async function mapWithLimit<T, R>(
+export async function mapWithLimit<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>
