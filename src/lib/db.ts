@@ -68,6 +68,7 @@ export type AddContactOpts = {
   displayNameHint?: string;
   mutualSources?: AtmoSource[];
   discoveredVia?: 'manual' | 'mutual';
+  signal?: AbortSignal;
 };
 
 export async function addContactFromDid(did: string, opts: AddContactOpts = {}): Promise<Contact> {
@@ -75,8 +76,8 @@ export async function addContactFromDid(did: string, opts: AddContactOpts = {}):
   if (existing) return existing;
 
   const [profile, sifa] = await Promise.all([
-    getProfile(did).catch(() => null),
-    fetchSifaProfile(did).catch(() => null)
+    getProfile(did, opts.signal).catch(() => null),
+    fetchSifaProfile(did, opts.signal).catch(() => null)
   ]);
 
   const handle = profile?.handle ?? opts.handleHint ?? did;
@@ -167,8 +168,9 @@ export type AtmoSyncResult = {
  */
 export async function syncAtmosphereMutuals(
   user: { did: string },
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; signal?: AbortSignal } = {}
 ): Promise<AtmoSyncResult> {
+  const { signal } = opts;
   const syncKey = atmoSyncKey(user.did);
   if (!opts.force) {
     try {
@@ -181,11 +183,13 @@ export async function syncAtmosphereMutuals(
     }
   }
 
-  const mutuals = await findAtmosphereMutuals(user);
+  const mutuals = await findAtmosphereMutuals(user, signal);
+  if (signal?.aborted) return { added: 0, annotated: 0, total: 0 };
   let added = 0;
   let annotated = 0;
 
   for (const [did, sources] of mutuals) {
+    if (signal?.aborted) return { added, annotated, total: mutuals.size };
     const existing = await db.contacts.get(did);
     if (existing) {
       const merged = mergeAtmoSources(existing.mutualSources, sources);
@@ -196,16 +200,21 @@ export async function syncAtmosphereMutuals(
     } else {
       await addContactFromDid(did, {
         mutualSources: sources,
-        discoveredVia: 'mutual'
+        discoveredVia: 'mutual',
+        signal
       });
       added++;
     }
   }
 
-  try {
-    localStorage.setItem(syncKey, String(Date.now()));
-  } catch {
-    // localStorage unavailable — the next run will just re-sync.
+  // If the caller bailed mid-flight, don't stamp the throttle — we want the
+  // next mount to retry rather than skip-because-already-synced.
+  if (!signal?.aborted) {
+    try {
+      localStorage.setItem(syncKey, String(Date.now()));
+    } catch {
+      // localStorage unavailable — the next run will just re-sync.
+    }
   }
 
   return { added, annotated, total: mutuals.size };

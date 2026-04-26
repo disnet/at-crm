@@ -28,6 +28,7 @@
   let user = $state<AuthUser | null>(null);
   let signingOut = $state(false);
   let syncingMutuals = $state(false);
+  const syncAbort = new AbortController();
 
   let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
 
@@ -57,8 +58,11 @@
     });
 
     syncingMutuals = true;
-    syncAtmosphereMutuals(u)
-      .catch((err) => console.warn('Atmosphere mutual sync failed', err))
+    syncAtmosphereMutuals(u, { signal: syncAbort.signal })
+      .catch((err) => {
+        if (syncAbort.signal.aborted) return;
+        console.warn('Atmosphere mutual sync failed', err);
+      })
       .finally(() => {
         syncingMutuals = false;
       });
@@ -71,6 +75,7 @@
     };
     window.addEventListener('keydown', onKey);
     return () => {
+      syncAbort.abort();
       sub.unsubscribe();
       window.removeEventListener('keydown', onKey);
     };
@@ -102,6 +107,7 @@
   async function signOut() {
     if (signingOut) return;
     signingOut = true;
+    syncAbort.abort();
     const u = user;
     try {
       if (u) {
