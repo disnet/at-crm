@@ -1,6 +1,14 @@
 import Dexie, { type Table } from 'dexie';
-import { formatAddress, type Contact, type Message, type NoteEntry, type SourceKey } from './data';
+import {
+  formatAddress,
+  type AtmoSource,
+  type Contact,
+  type Message,
+  type NoteEntry,
+  type SourceKey
+} from './data';
 import { fetchSifaProfile, getProfile, type ActorTypeahead } from './atproto';
+import { findAtmosphereMutuals, mapWithLimit } from './atmo';
 
 class CrmDB extends Dexie {
   contacts!: Table<Contact, string>;
@@ -8,14 +16,37 @@ class CrmDB extends Dexie {
   constructor() {
     super('crm');
     this.version(1).stores({ contacts: 'id, order' });
-    // v2 reshapes Contact (drops mock seed + adds sifa). Old rows are stale — clear.
+    // v2 reshaped Contact (drops mock seed + adds sifa). Old rows were stale — cleared.
     this.version(2)
       .stores({ contacts: 'id, order' })
       .upgrade((tx) => tx.table('contacts').clear());
+    // v3 adds mutualSources / discoveredVia. Existing rows backfill in place
+    // — they were added manually, so default discoveredVia to 'manual'.
+    this.version(3)
+      .stores({ contacts: 'id, order' })
+      .upgrade((tx) =>
+        tx
+          .table('contacts')
+          .toCollection()
+          .modify((c: Contact) => {
+            if (!Array.isArray(c.mutualSources)) c.mutualSources = [];
+            if (!c.discoveredVia) c.discoveredVia = 'manual';
+          })
+      );
   }
 }
 
 export const db = new CrmDB();
+
+const ATMO_SYNC_KEY_PREFIX = 'crm_atmoSyncedAt';
+const ATMO_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// Scoped per-DID so signing into a different account triggers a fresh sync
+// even within the throttle window — the previous user's contacts stay in
+// IndexedDB and would otherwise mask the new user's mutuals.
+function atmoSyncKey(did: string): string {
+  return `${ATMO_SYNC_KEY_PREFIX}:${did}`;
+}
 
 function initialsFrom(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -31,16 +62,27 @@ function avatarColorForDid(did: string): string {
   return `oklch(68% 0.13 ${hue})`;
 }
 
-export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Contact> {
-  const existing = await db.contacts.get(actor.did);
+export type AddContactOpts = {
+  handleHint?: string;
+  avatarHint?: string;
+  displayNameHint?: string;
+  mutualSources?: AtmoSource[];
+  discoveredVia?: 'manual' | 'mutual';
+  signal?: AbortSignal;
+};
+
+export async function addContactFromDid(did: string, opts: AddContactOpts = {}): Promise<Contact> {
+  const existing = await db.contacts.get(did);
   if (existing) return existing;
 
   const [profile, sifa] = await Promise.all([
-    getProfile(actor.did).catch(() => null),
-    fetchSifaProfile(actor.did).catch(() => null)
+    getProfile(did, opts.signal).catch(() => null),
+    fetchSifaProfile(did, opts.signal).catch(() => null)
   ]);
 
-  const name = profile?.displayName?.trim() || actor.displayName?.trim() || actor.handle;
+  const handle = profile?.handle ?? opts.handleHint ?? did;
+  const name =
+    profile?.displayName?.trim() || opts.displayNameHint?.trim() || handle;
 
   const primaryPosition =
     sifa?.positions.find((p) => p.isPrimary && !p.endedAt) ??
@@ -52,40 +94,201 @@ export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Cont
     sifa?.self?.headline?.trim() ||
     (primaryPosition ? `${primaryPosition.title} · ${primaryPosition.company}` : '') ||
     profile?.description?.split('\n')[0]?.trim() ||
-    `@${actor.handle}`;
+    `@${handle}`;
 
   const primaryExternal =
     sifa?.externalAccounts.find((e) => e.isPrimary) ?? sifa?.externalAccounts[0] ?? null;
 
-  const url = primaryExternal?.url || `https://bsky.app/profile/${actor.handle}`;
+  const url = primaryExternal?.url || `https://bsky.app/profile/${handle}`;
 
   const last = await db.contacts.orderBy('order').last();
   const order = (last?.order ?? 0) + 1;
 
   const contact: Contact = {
-    id: actor.did,
+    id: did,
     order,
-    did: actor.did,
-    handle: actor.handle,
+    did,
+    handle,
     name,
     initials: initialsFrom(name),
-    avatarColor: avatarColorForDid(actor.did),
-    avatarUrl: profile?.avatar ?? actor.avatar,
+    avatarColor: avatarColorForDid(did),
+    avatarUrl: profile?.avatar ?? opts.avatarHint,
     bio: profile?.description?.trim() || undefined,
     tagline,
     location: formatAddress(sifa?.self?.location),
     url,
     sources: ['bluesky'],
-    lastMsg: `@${actor.handle}`,
+    lastMsg: `@${handle}`,
     lastActive: 'Just added',
     unread: 0,
     reminder: null,
     threads: { bluesky: [] },
-    sifa
+    sifa,
+    mutualSources: opts.mutualSources ? [...opts.mutualSources] : [],
+    discoveredVia: opts.discoveredVia ?? 'manual'
   };
 
   await db.contacts.put(contact);
   return contact;
+}
+
+export async function addContactFromBluesky(actor: ActorTypeahead): Promise<Contact> {
+  return addContactFromDid(actor.did, {
+    handleHint: actor.handle,
+    avatarHint: actor.avatar,
+    displayNameHint: actor.displayName,
+    discoveredVia: 'manual'
+  });
+}
+
+function mergeAtmoSources(prev: AtmoSource[] | undefined, incoming: AtmoSource[]): AtmoSource[] {
+  const order: AtmoSource[] = ['bluesky', 'sifa', 'tangled'];
+  const set = new Set<AtmoSource>(prev ?? []);
+  for (const s of incoming) set.add(s);
+  return order.filter((s) => set.has(s));
+}
+
+function sameAtmoSources(a: AtmoSource[], b: AtmoSource[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+export type AtmoSyncResult = {
+  added: number;
+  annotated: number;
+  total: number;
+  /** Platforms whose follow lists we couldn't exhaustively fetch — there are
+   *  likely additional mutuals beyond what was synced. */
+  truncated: Partial<Record<AtmoSource, boolean>>;
+};
+
+const MUTUAL_SEED_CONCURRENCY = 6;
+const MUTUAL_HYDRATE_CONCURRENCY = 4;
+
+/**
+ * Seeds a Contact for a mutual using only the public Bluesky profile, deferring
+ * the much-heavier Sifa fan-out (PDS resolve + ~7 listRecords) to a follow-up
+ * pass. Lets the sync UI clear quickly even when the user has hundreds of
+ * mutuals; Sifa data fills in lazily.
+ */
+async function seedMutualContact(
+  did: string,
+  sources: AtmoSource[],
+  signal?: AbortSignal
+): Promise<boolean> {
+  if (signal?.aborted) return false;
+  const existing = await db.contacts.get(did);
+  if (existing) return false;
+
+  const profile = await getProfile(did, signal).catch(() => null);
+  if (signal?.aborted) return false;
+
+  const handle = profile?.handle ?? did;
+  const name = profile?.displayName?.trim() || handle;
+  const tagline = profile?.description?.split('\n')[0]?.trim() || `@${handle}`;
+
+  const last = await db.contacts.orderBy('order').last();
+  const order = (last?.order ?? 0) + 1;
+
+  const contact: Contact = {
+    id: did,
+    order,
+    did,
+    handle,
+    name,
+    initials: initialsFrom(name),
+    avatarColor: avatarColorForDid(did),
+    avatarUrl: profile?.avatar,
+    bio: profile?.description?.trim() || undefined,
+    tagline,
+    location: undefined,
+    url: `https://bsky.app/profile/${handle}`,
+    sources: ['bluesky'],
+    lastMsg: `@${handle}`,
+    lastActive: 'Just added',
+    unread: 0,
+    reminder: null,
+    threads: { bluesky: [] },
+    sifa: null,
+    mutualSources: [...sources],
+    discoveredVia: 'mutual'
+  };
+
+  await db.contacts.put(contact);
+  return true;
+}
+
+/**
+ * Discovers atmosphere mutuals for the signed-in user and seeds them as
+ * contacts (or annotates existing contacts with their mutual sources).
+ * Existing manual contacts keep `discoveredVia: 'manual'` — they just gain
+ * platform tags. Throttled to once per `ATMO_SYNC_INTERVAL_MS` per browser.
+ */
+export async function syncAtmosphereMutuals(
+  user: { did: string },
+  opts: { force?: boolean; signal?: AbortSignal } = {}
+): Promise<AtmoSyncResult> {
+  const { signal } = opts;
+  const syncKey = atmoSyncKey(user.did);
+  if (!opts.force) {
+    try {
+      const last = Number(localStorage.getItem(syncKey) ?? '0');
+      if (last && Date.now() - last < ATMO_SYNC_INTERVAL_MS) {
+        return { added: 0, annotated: 0, total: 0, truncated: {} };
+      }
+    } catch {
+      // localStorage unavailable — proceed anyway.
+    }
+  }
+
+  const { mutuals, truncated } = await findAtmosphereMutuals(user, signal);
+  if (signal?.aborted) return { added: 0, annotated: 0, total: 0, truncated };
+
+  // Annotate existing contacts up front (cheap — local DB only).
+  let annotated = 0;
+  const toSeed: Array<{ did: string; sources: AtmoSource[] }> = [];
+  for (const [did, sources] of mutuals) {
+    if (signal?.aborted) return { added: 0, annotated, total: mutuals.size, truncated };
+    const existing = await db.contacts.get(did);
+    if (existing) {
+      const merged = mergeAtmoSources(existing.mutualSources, sources);
+      if (!sameAtmoSources(existing.mutualSources ?? [], merged)) {
+        await db.contacts.update(did, { mutualSources: merged });
+        annotated++;
+      }
+    } else {
+      toSeed.push({ did, sources });
+    }
+  }
+
+  // Seed minimal contacts in parallel — one Bluesky profile call each, no Sifa
+  // yet. Concurrency-limited so we don't hammer the appview.
+  const seeded = await mapWithLimit(toSeed, MUTUAL_SEED_CONCURRENCY, ({ did, sources }) =>
+    seedMutualContact(did, sources, signal).catch(() => false)
+  );
+  const added = seeded.filter(Boolean).length;
+  if (signal?.aborted) return { added, annotated, total: mutuals.size, truncated };
+
+  // Hydrate Sifa for newly-seeded contacts in the background. Fire-and-forget
+  // so the sync pill clears as soon as the basic profiles land; Sifa pickups
+  // ride on the same liveQuery into the UI when each row's update commits.
+  const seededDids = toSeed.filter((_, i) => seeded[i]).map((m) => m.did);
+  void mapWithLimit(seededDids, MUTUAL_HYDRATE_CONCURRENCY, (did) =>
+    refreshSifa(did, signal).catch(() => undefined)
+  );
+
+  // If the caller bailed mid-flight, don't stamp the throttle — we want the
+  // next mount to retry rather than skip-because-already-synced.
+  if (!signal?.aborted) {
+    try {
+      localStorage.setItem(syncKey, String(Date.now()));
+    } catch {
+      // localStorage unavailable — the next run will just re-sync.
+    }
+  }
+
+  return { added, annotated, total: mutuals.size, truncated };
 }
 
 function newId(): string {
@@ -187,11 +390,12 @@ export async function sendMockMessage(
   }, 1400);
 }
 
-export async function refreshSifa(did: string): Promise<void> {
+export async function refreshSifa(did: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
   const existing = await db.contacts.get(did);
   if (!existing) return;
-  const sifa = await fetchSifaProfile(did).catch(() => null);
-  if (!sifa) return;
+  const sifa = await fetchSifaProfile(did, signal).catch(() => null);
+  if (!sifa || signal?.aborted) return;
   await db.contacts.update(did, {
     sifa,
     location: formatAddress(sifa.self?.location) ?? existing.location

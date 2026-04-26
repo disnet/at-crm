@@ -1,6 +1,7 @@
 <script lang="ts">
   import Avatar from './Avatar.svelte';
   import SourceChip from './SourceChip.svelte';
+  import AtmoChip from './AtmoChip.svelte';
   import ReminderChip from './ReminderChip.svelte';
   import NoteEntryCard from './NoteEntry.svelte';
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
@@ -103,6 +104,9 @@
         <div class="hero-chips">
           {#each contact.sources as src (src)}
             <SourceChip source={src} size="md" />
+          {/each}
+          {#each contact.mutualSources ?? [] as src (src)}
+            <AtmoChip source={src} size="md" />
           {/each}
         </div>
       </div>

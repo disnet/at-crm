@@ -10,7 +10,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { liveQuery, type Subscription } from 'dexie';
-  import { db } from '$lib/db';
+  import { db, syncAtmosphereMutuals } from '$lib/db';
   import type { Contact } from '$lib/data';
   import { getUser, clearUser, type AuthUser } from '$lib/auth';
   import { getOAuthClient } from '$lib/oauth';
@@ -27,6 +27,8 @@
   let contextCollapsed = $state(true);
   let user = $state<AuthUser | null>(null);
   let signingOut = $state(false);
+  let syncingMutuals = $state(false);
+  const syncAbort = new AbortController();
 
   let activeContact = $derived((activeId && contacts.find((c) => c.id === activeId)) || null);
 
@@ -55,6 +57,25 @@
       }
     });
 
+    syncingMutuals = true;
+    syncAtmosphereMutuals(u, { signal: syncAbort.signal })
+      .then((result) => {
+        const capped = Object.keys(result.truncated);
+        if (capped.length > 0) {
+          console.warn(
+            `Atmosphere mutual sync hit pagination caps for: ${capped.join(', ')}. ` +
+              'Some mutuals may be missing — see FOLLOW_CAP / BSKY_GRAPH_MAX_PAGES.'
+          );
+        }
+      })
+      .catch((err) => {
+        if (syncAbort.signal.aborted) return;
+        console.warn('Atmosphere mutual sync failed', err);
+      })
+      .finally(() => {
+        syncingMutuals = false;
+      });
+
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -63,6 +84,7 @@
     };
     window.addEventListener('keydown', onKey);
     return () => {
+      syncAbort.abort();
       sub.unsubscribe();
       window.removeEventListener('keydown', onKey);
     };
@@ -94,6 +116,7 @@
   async function signOut() {
     if (signingOut) return;
     signingOut = true;
+    syncAbort.abort();
     const u = user;
     try {
       if (u) {
@@ -120,6 +143,7 @@
     {activeId}
     {user}
     {signingOut}
+    {syncingMutuals}
     onSelect={selectContact}
     onSearch={() => (searchOpen = true)}
     onReminders={() => (remindersOpen = true)}
