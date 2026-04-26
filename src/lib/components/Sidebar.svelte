@@ -16,6 +16,7 @@
     user: AuthUser;
     signingOut?: boolean;
     syncingMutuals?: boolean;
+    syncingDMs?: boolean;
     onSelect: (id: string) => void;
     onSearch: () => void;
     onReminders: () => void;
@@ -28,6 +29,7 @@
     user,
     signingOut = false,
     syncingMutuals = false,
+    syncingDMs = false,
     onSelect,
     onSearch,
     onReminders,
@@ -82,6 +84,11 @@
       <span class="spin"><LoaderIcon size={11} strokeWidth={2.2} /></span>
       <span>Finding atmosphere mutuals…</span>
     </div>
+  {:else if syncingDMs}
+    <div class="sync-pill" role="status">
+      <span class="spin"><LoaderIcon size={11} strokeWidth={2.2} /></span>
+      <span>Reading Bluesky DMs…</span>
+    </div>
   {/if}
 
   <div class="list">
@@ -135,7 +142,10 @@
       <div class="me-name">{meName}</div>
       <div class="me-sub">@{user.handle}</div>
     </div>
-    <IconBtn label={signingOut ? 'Signing out…' : 'Sign out'} onclick={signingOut ? () => {} : onSignOut}>
+    <IconBtn
+      label={signingOut ? 'Signing out…' : 'Sign out'}
+      onclick={signingOut ? () => {} : onSignOut}
+    >
       {#if signingOut}
         <span class="spin"><LoaderIcon size={15} strokeWidth={2} /></span>
       {:else}
