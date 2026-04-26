@@ -38,8 +38,15 @@ class CrmDB extends Dexie {
 
 export const db = new CrmDB();
 
-const ATMO_SYNC_KEY = 'crm_atmoSyncedAt';
+const ATMO_SYNC_KEY_PREFIX = 'crm_atmoSyncedAt';
 const ATMO_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12h
+
+// Scoped per-DID so signing into a different account triggers a fresh sync
+// even within the throttle window — the previous user's contacts stay in
+// IndexedDB and would otherwise mask the new user's mutuals.
+function atmoSyncKey(did: string): string {
+  return `${ATMO_SYNC_KEY_PREFIX}:${did}`;
+}
 
 function initialsFrom(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -162,9 +169,10 @@ export async function syncAtmosphereMutuals(
   user: { did: string },
   opts: { force?: boolean } = {}
 ): Promise<AtmoSyncResult> {
+  const syncKey = atmoSyncKey(user.did);
   if (!opts.force) {
     try {
-      const last = Number(localStorage.getItem(ATMO_SYNC_KEY) ?? '0');
+      const last = Number(localStorage.getItem(syncKey) ?? '0');
       if (last && Date.now() - last < ATMO_SYNC_INTERVAL_MS) {
         return { added: 0, annotated: 0, total: 0 };
       }
@@ -195,7 +203,7 @@ export async function syncAtmosphereMutuals(
   }
 
   try {
-    localStorage.setItem(ATMO_SYNC_KEY, String(Date.now()));
+    localStorage.setItem(syncKey, String(Date.now()));
   } catch {
     // localStorage unavailable — the next run will just re-sync.
   }
