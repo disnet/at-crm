@@ -29,14 +29,13 @@ export function getOAuthClient(options: OAuthClientOptions = {}): Promise<Browse
 
   if (!clientPromise) {
     const { origin, hostname, port, protocol } = window.location;
-    const isLoopback =
-      hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 
     let clientId: string;
     if (isLoopback) {
       const redirect = `http://127.0.0.1${port ? `:${port}` : ''}/login`;
       const params = new URLSearchParams({
-        scope: 'atproto',
+        scope: 'atproto transition:chat.bsky',
         redirect_uri: redirect
       });
       clientId = `http://localhost?${params.toString()}`;

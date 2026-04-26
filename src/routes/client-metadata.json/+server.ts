@@ -23,7 +23,7 @@ export const GET: RequestHandler = ({ url }) => {
     client_name: 'Personal CRM',
     client_uri: origin,
     redirect_uris: [`${origin}/login`],
-    scope: 'atproto',
+    scope: 'atproto transition:chat.bsky',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
     token_endpoint_auth_method: 'none',
